@@ -25,3 +25,18 @@ Each row is one PR. Everything must run against the Virtual Rig in CI; `bench-ve
 * Branch names `devin/<unix-ts>-<slug>`; PR title starts with the story IDs it closes, e.g. `US-13 US-14: transport ABC + Virtual Rig`.
 * Tests go in `tests/test_<area>.py`; conformance tests are parametrised over `[virtual, bridge-sim]` transports so the two never drift.
 * No PR merges with `ruff` or `pytest` red. `make demo` must keep passing until PR 7 replaces it.
+
+## Parallel stream (`claude/*` branches)
+
+A second agent works the Pi side of the roadmap so the two streams do not edit the same files.
+
+| Roadmap row | Scope | PR | Status |
+|---|---|---|---|
+| 5 | `pi/bridge` daemon over TCP: per-connection control, fail-safe, `bridge-sim` conformance; host `TcpTransport` (US-01 TCP, US-03, US-12, US-16) | #4 | in-review |
+| 5 | Hardware executor behind a driver interface (US-05…US-12 on a real header); lgpio driver + `--backend real` next | #5 | draft |
+| 6 | BLE GATT server (`bless`) + `BleTransport` (`bleak`) (US-01, US-02, US-04 CBOR, US-15) | — | todo |
+| 7 (part) | `scripts/pi-install.sh`, `aperture-bridge.service` (US-62) | — | todo |
+| — | ESP32 bench DUT firmware (US-67) | #2 | in-review |
+| — | Spec review R-1…R-13, EPIC-08, UF-8…UF-11 | this PR | in-review |
+
+Rows 2–4 (requests, sessions, tools, plans, UI) stay with the `devin/*` stream. Branch names `claude/<unix-ts>-<slug>`.
