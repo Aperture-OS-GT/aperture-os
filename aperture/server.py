@@ -39,7 +39,9 @@ class ConsoleApp:
         self.home = home
         self.actor = actor
         self.lock = threading.RLock()
-        self.cond = threading.Condition(self.lock)
+        # The feed has its own lock: session events arrive on transport reader threads while a request
+        # holds self.lock, so pushing to the feed must never wait for self.lock.
+        self.cond = threading.Condition(threading.RLock())
         self.session: Session | None = None
         self.tools: Tools | None = None
         self.feed: list[dict] = []          # every session event + console notices, with a global cursor
@@ -63,14 +65,15 @@ class ConsoleApp:
                 self.session.end("new_session")
             self.session = Session(actor=self.actor, home=self.home)
             self.tools = Tools(self.session)
-            self.session.on_event(self._push)
+            sid = self.session.id
+            self.session.on_event(lambda event: self._push(event, sid))
             self.replay = None
             self._notice("session.new", session=self.session.id)
             return self.session
 
-    def _push(self, event: dict) -> None:
+    def _push(self, event: dict, session_id: str) -> None:
         with self.cond:
-            self.feed.append({"cursor": len(self.feed) + 1, "session": self.session.id, **event})
+            self.feed.append({"cursor": len(self.feed) + 1, "session": session_id, **event})
             self.cond.notify_all()
 
     def _notice(self, kind: str, **fields) -> None:

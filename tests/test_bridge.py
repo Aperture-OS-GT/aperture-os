@@ -231,3 +231,13 @@ def test_session_lifecycle_over_tcp(bridge, tmp_path):
     executed = {e["req"] for e in stages if e["stage"] == "executed"}
     assert executed and executed <= acked
     tools.call("disconnect")
+
+
+def test_console_connects_to_tcp_bridge(bridge, tmp_path):
+    from aperture.server import ConsoleApp
+    _core, port = bridge
+    app = ConsoleApp(home=str(tmp_path), llm=False)
+    state = app.connect({"transport": "tcp", "target": f"127.0.0.1:{port}"})
+    assert state["connection"]["connected"] and state["connection"]["controller"]
+    assert any(e["kind"] == "request.stage" and e["stage"] == "acknowledged" for e in app.events_since(0))
+    app.session.disconnect("test")
