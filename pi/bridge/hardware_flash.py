@@ -27,7 +27,8 @@ from .hardware_buses import UART_BAUD_MAX, UART_BAUD_MIN
 APP_OFFSET = 0x10000
 MAX_STAGED_BYTES = 4 * 1024 * 1024
 TAIL_CHARS = 400          # esptool output kept in a reply (error message or success log)
-ESPTOOL_TIMEOUT_S = 220   # inside the host's 240 s flash.run timeout: a hang is reported
+ESPTOOL_TIMEOUT_S = 220   # plus both manual-boot windows (2 x 30 s), inside the host's 300 s flash.run timeout
+MANUAL_BOOT_KEYS = ("boot_resets", "app_booted", "boot_log")
 
 
 def _one_line(text: str, limit: int = TAIL_CHARS) -> str:
@@ -85,17 +86,27 @@ class FlashOps:
         with tempfile.TemporaryDirectory(prefix="aperture-flash-") as folder:
             result = self._esptool(_write_images(Path(folder), staged), baud,
                                    r.get("manual_boot", False))
-        return {"flashed": True, "seconds": result["seconds"],
-                "images": [{"offset": offset, "size": len(data)}
-                           for offset, data in sorted(staged.items())],
-                "uart_closed": closed, "log": result["log"][-TAIL_CHARS:]}
+        reply = {"flashed": True, "seconds": result["seconds"],
+                 "images": [{"offset": offset, "size": len(data)}
+                            for offset, data in sorted(staged.items())],
+                 "uart_closed": closed, "log": result["log"][-TAIL_CHARS:]}
+        # manual boot listened to the chip: how many resets it took and what the new app printed
+        reply.update({key: result[key] for key in MANUAL_BOOT_KEYS if key in result})
+        return reply
+
+    def _rom_serial(self):
+        """The header UART at the ESP32 ROM's 115200 baud, to watch its boot messages."""
+        import serial  # pyserial, a [pi] extra
+
+        return serial.Serial(self.buses.uart, esp32_flash.DEFAULT_BAUD, timeout=0.1)
 
     def _esptool(self, images: list[tuple[int, Path]], baud: int, manual_boot: bool) -> dict:
         boot, en = self.buses.flash
         try:
             return esp32_flash.flash(self.driver, images, port=self.buses.uart, baud=baud,
                                      boot_pin=None if manual_boot else boot, en_pin=en,
-                                     timeout_s=ESPTOOL_TIMEOUT_S)
+                                     timeout_s=ESPTOOL_TIMEOUT_S,
+                                     open_serial=self._rom_serial if manual_boot else None)
         except RuntimeError as exc:
             raise ProtocolError("io", _one_line(str(exc))) from exc
         except subprocess.TimeoutExpired as exc:

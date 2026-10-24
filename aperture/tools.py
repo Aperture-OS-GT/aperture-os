@@ -37,6 +37,10 @@ ESP32_WIRING = {ESP32_TX: ("RX0", "out"), ESP32_RX: ("TX0", "in"), ESP32_EN: ("E
 FLASH_CHUNK = 32 * 1024  # protocol limit for one bytes field
 FLASH_BAUD = 115200
 BOOT_BANNER, BOOT_TIMEOUT_MS = r"BOOT OK", 4000
+HOLD_BOOT_NOTE = ("Flashing the ESP32: press and hold its BOOT button for about 3 seconds now, then let go. "
+                  "The Pi resets it once a second until it sees download mode (gives up after 30 s).")
+UNKNOWN_COMMAND = "ERR unknown command"
+LINE_SETTLE_MS = 60  # time for the firmware to answer a stray partial line
 DUT_REPLY_TIMEOUT_MS = 2000
 LED_REPLY = r"(OK LED[^\r\n]*|ERR[^\r\n]*)"
 LCD_REPLY = r"(OK LCD|ERR[^\r\n]*)"
@@ -578,8 +582,11 @@ class Tools:
         self._req("flash.begin")
         for offset, data in images:
             self._stage(offset, data)
+        if manual_boot and not self._virtual_rig():
+            self.session.note(HOLD_BOOT_NOTE, "system")  # live in the console while flash.run waits
         run = self._flash_run(manual_boot)
-        return self._result(run, build=origin, **self._await_boot())
+        result = self._result(run, build=origin, **self._await_boot(run.result.get("boot_log") or ""))
+        return {key: value for key, value in result.items() if key != "boot_log"}  # verdict, not ROM chatter
 
     def led(self, state: str, hz: float = DEFAULT_BLINK_HZ) -> dict:
         line = f"LED BLINK {hz:g}" if state == "blink" else f"LED {state.upper()}"
@@ -640,12 +647,15 @@ class Tools:
         self._forget_ports(run.result.get("uart_closed") or [])
         return run
 
-    def _await_boot(self) -> dict:
-        """Reopen the ESP32 UART and wait for the boot banner; a miss is reported, not raised."""
+    def _await_boot(self, boot_log: str) -> dict:
+        """Reopen the ESP32 UART and wait for the boot banner; a miss is reported, not raised.
+        A manual-boot flash listened to the new app's first seconds itself (``boot_log``): the
+        banner is usually there already, printed before this port was open."""
         port = None
         try:
             port = self._esp32_uart()
-            self.uart_expect(port, BOOT_BANNER, BOOT_TIMEOUT_MS)
+            if not re.search(BOOT_BANNER, boot_log):
+                self.uart_expect(port, BOOT_BANNER, BOOT_TIMEOUT_MS)
         except ToolError as exc:
             return {"boot_ok": False, "port": port, "boot_error": f"{exc.code}: {exc.msg}"}
         return {"boot_ok": True, "port": port}
@@ -672,11 +682,17 @@ class Tools:
             self._forget_ports([port])
             port = self._esp32_uart()
             text = self._exchange(port, line, reply)
+        if text == UNKNOWN_COMMAND:  # our command is valid: a stray line's late answer, or line noise
+            text = self._exchange(port, line, reply)
         if text.startswith("ERR"):
             raise ToolError("dut_error", text, port=port, command=line)
         return {"reply": text, "port": port, "command": line}
 
     def _exchange(self, port: int, line: str, reply: str) -> str:
+        # A partial line left in the firmware (e.g. esptool sync bytes after a failed flash) would
+        # swallow the command: end it with a bare newline and drop whatever the firmware says to it.
+        self._req("uart.write", port=port, data=b"\n")
+        self._drain(port, LINE_SETTLE_MS)
         self._flush_rx(port)
         self._req("uart.write", port=port, data=(line + "\n").encode("ascii", "replace"))
         return self.uart_expect(port, reply, DUT_REPLY_TIMEOUT_MS)["match"].strip()

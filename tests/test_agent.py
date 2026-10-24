@@ -93,7 +93,7 @@ def test_agent_runs_tool_calls_on_the_virtual_rig_and_replies(rig, monkeypatch):
     assert out["results"][1]["result"]["observed"]["level"] == 1
     assert out["results"][2]["result"]["level"] == 1
     first, second, third = completions.requests
-    assert first["model"] == "gpt-4o-mini"
+    assert first["model"] == "gpt-5.1"
     assert {t["function"]["name"] for t in first["tools"]} == set(SPECS)
     system, user = first["messages"]
     assert system["role"] == "system" and "GPIO17 -> ESP32 D4" in system["content"]
@@ -246,8 +246,9 @@ def test_prompt_runs_the_agent_without_holding_the_console_lock(app, monkeypatch
 def test_keepalive_holds_control_past_a_short_watchdog(app):
     app.connect({"transport": "virtual", "scenario": "button_led", "realtime": True})
     transport = app.session.transport
-    with app.lock:
-        assert transport.take_control(watchdog_s=0.5).ok
+    with app.lock:  # through the Session, as the console does, so its keepalive learns the period
+        assert app.session.request("control.take", "system", token=transport.control_token,
+                                   watchdog_s=0.5).ok
     time.sleep(1.5)
     assert app.state()["connection"]["controller"] is True  # state() pumps the rig's watchdog check
     events = app.session.events

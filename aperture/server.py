@@ -36,6 +36,7 @@ KEEPALIVE_TICK_S = 0.1      # short, so even a sub-second watchdog is fed in tim
 KEEPALIVE_FRACTION = 3      # ping once a third of the watchdog passed without a feeding request
 KEEPALIVE_JOIN_S = 1.0
 FEEDS_WATCHDOG = DRIVING_OPS | {"ping", "control.take"}  # requests every bridge counts as alive
+STATE_LOCK_WAIT_S = 0.5     # longer than any short request; then /api/state answers from its last view
 AGENT_HISTORY_NOTES = 6     # earlier tester/agent notes the model sees, for follow-up prompts
 AI_FALLBACK = "AI unavailable ({}); used the offline interpreter. "
 
@@ -53,7 +54,7 @@ class ConsoleApp:
         self.home = home
         self.actor = actor
         self.lock = threading.RLock()
-        self.cond = threading.Condition(self.lock)
+        self.cond = threading.Condition()   # the feed's own lock: a minutes-long tool call never stalls events
         self.session: Session | None = None
         self.tools: Tools | None = None
         self.feed: list[dict] = []          # every session event + console notices, with a global cursor
@@ -64,6 +65,7 @@ class ConsoleApp:
         self._fed_at = 0.0                  # monotonic time of the last request that feeds the watchdog
         self._closing = threading.Event()
         self._new_session()
+        self._last_state = self._state()    # what /api/state serves while a tool call holds the console
         self._keepalive = threading.Thread(target=self._keepalive_loop, name="console-keepalive", daemon=True)
         self._keepalive.start()
 
@@ -89,7 +91,7 @@ class ConsoleApp:
             self.cond.notify_all()
 
     def _watch_control(self, event: dict) -> None:
-        """Keepalive bookkeeping from the session's own events (runs under the console lock)."""
+        """Keepalive bookkeeping from the session's own events (runs under the feed lock)."""
         if event["kind"] == "control.lost":
             self._control_lost = True
         elif event["kind"] == "request.stage" and event.get("stage") == "requested" \
@@ -147,6 +149,17 @@ class ConsoleApp:
 
     # --- state --------------------------------------------------------------------------
     def state(self) -> dict:
+        """The console's view of the bench. A tool call can hold the console for minutes (a firmware
+        build and flash): the page then gets the last full view, marked busy, instead of hanging."""
+        if not self.lock.acquire(timeout=STATE_LOCK_WAIT_S):
+            return {**self._last_state, "cursor": len(self.feed), "busy": True}
+        try:
+            self._last_state = self._state()
+            return self._last_state
+        finally:
+            self.lock.release()
+
+    def _state(self) -> dict:
         with self.lock:
             self._tick()
             transport = self.session.transport

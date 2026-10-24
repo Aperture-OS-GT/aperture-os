@@ -32,15 +32,16 @@ class FakeFlasher:
     """Stand-in for ``esp32_flash.flash``: records each call with the image bytes it was given."""
 
     def __init__(self):
-        self.calls, self.error = [], None
+        self.calls, self.error, self.extra = [], None, {}
 
-    def __call__(self, driver, images, port, baud, boot_pin, en_pin, timeout_s):
+    def __call__(self, driver, images, port, baud, boot_pin, en_pin, timeout_s, open_serial=None):
         self.calls.append({"images": [(offset, path, path.read_bytes()) for offset, path in images],
                            "port": port, "baud": baud, "boot_pin": boot_pin, "en_pin": en_pin,
-                           "timeout_s": timeout_s})
+                           "timeout_s": timeout_s, "open_serial": open_serial})
         if self.error:
             raise self.error
-        return {"flashed": True, "seconds": 1.5, "baud": baud, "images": [], "log": ESPTOOL_LOG}
+        return {"flashed": True, "seconds": 1.5, "baud": baud, "images": [], "log": ESPTOOL_LOG,
+                **self.extra}
 
     def paths(self):
         return [path for call in self.calls for _, path, _ in call["images"]]
@@ -154,7 +155,8 @@ def test_flash_run_closes_the_uart_and_flashes_every_staged_image(make, flasher)
                                                                       (APP, b"app-image")]
     assert (call["port"], call["baud"], call["boot_pin"], call["en_pin"]) == ("/dev/serial0",
                                                                              115200, 24, 25)
-    assert call["timeout_s"] < DEFAULT_TIMEOUTS["flash.run"]  # answer before the host gives up
+    waits = esp32_flash.MANUAL_BOOT_WINDOW_S + esp32_flash.APP_BOOT_WINDOW_S  # manual boot's worst case
+    assert call["timeout_s"] + waits < DEFAULT_TIMEOUTS["flash.run"]  # answer before the host gives up
     assert driver.uarts[0].closed and rig.ports == {}
     assert not any(path.exists() for path in flasher.paths())  # temp dir removed
     assert run(rig, "flash.run")["err"] == "bad_request"  # staging consumed
@@ -167,6 +169,20 @@ def test_manual_boot_leaves_boot_alone_and_baud_passes_through(make, flasher):
     assert run(rig, "flash.run", baud=460800, manual_boot=True)["uart_closed"] == []
     (call,) = flasher.calls
     assert (call["boot_pin"], call["en_pin"], call["baud"]) == (None, 25, 460800)
+    assert callable(call["open_serial"])  # manual boot listens to the ROM on the header UART
+
+
+def test_manual_boot_reply_carries_the_resets_and_the_new_apps_banner(make, flasher):
+    rig, _ = make()
+    flasher.extra = {"boot_resets": 3, "app_booted": True, "boot_log": "SPI_FAST_FLASH_BOOT\r\nBOOT OK"}
+    run(rig, "flash.write", offset=APP, data=b"app")
+    result = run(rig, "flash.run", manual_boot=True)
+    assert (result["boot_resets"], result["app_booted"], result["boot_log"]) == (
+        3, True, "SPI_FAST_FLASH_BOOT\r\nBOOT OK")
+    run(rig, "flash.write", offset=APP, data=b"app")
+    flasher.extra = {}
+    assert "app_booted" not in run(rig, "flash.run")
+    assert flasher.calls[-1]["open_serial"] is None  # BOOT on GPIO24: nothing to wait for
 
 
 @pytest.mark.parametrize("failure, code", [
@@ -201,8 +217,8 @@ def test_esptool_failure_message_keeps_the_start_and_the_verdict(make, flasher):
 def test_flash_pins_are_reserved_only_when_flashing_is_possible(make):
     rig, driver = make()
     assert run(rig, "pin.mode", pin=25, mode="output")["err"] == "pin_mode"
-    blocked = run(rig, "stream.set", pins=[24], on=True)
-    assert blocked["err"] == "pin_mode" and "reserved for flash" in blocked["msg"]
+    streamed = run(rig, "stream.set", pins=[23, 24], on=True)  # the console streams the whole header
+    assert streamed["pins"] == [23] and streamed["skipped"] == [{"pin": 24, "reserved": "flash"}]
     pins = {p["pin"]: p for p in run(rig, "list_pins")["pins"]}
     assert pins[24]["reserved"] == pins[25]["reserved"] == "flash" and pins[25]["level"] is None
     run(rig, "release_all")
@@ -315,3 +331,83 @@ def test_a_pin_that_cannot_be_claimed_is_still_released(fast, tmp_path, monkeypa
     with pytest.raises(OSError):
         esp32_flash.flash(driver, [(APP, image(tmp_path))], "/dev/serial0", run=esptool(driver))
     assert driver.calls[-2:] == RELEASED and not any(c[0] == "esptool" for c in driver.calls)
+
+
+# --- manual boot: listening to the ROM instead of timing the BOOT button -----------------------
+ROM_DOWNLOAD = (b"rst:0x1 (POWERON_RESET),boot:0x3 (DOWNLOAD_BOOT(UART0/UART1/SDIO_REI_REO_V2))\r\n"
+                b"waiting for download\r\n")
+ROM_APP = b"rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)\r\nentry 0x400805e4\r\nBOOT OK\r\n"
+
+
+class FakeRom:
+    """UART0 as the flasher hears it: after each EN pulse the chip prints the next scripted banner
+    (the last one repeats), i.e. whether the tester held BOOT through that reset."""
+
+    def __init__(self, driver, banners, en_pin=25):
+        self.driver, self.banners, self.en_pin = driver, banners, en_pin
+        self.answered = self.opened = self.closed = 0
+
+    def __call__(self):  # open_serial
+        self.opened += 1
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.closed += 1
+
+    def reset_input_buffer(self):
+        pass
+
+    def read(self, size):
+        resets = self.driver.calls.count(("write", self.en_pin, 1))
+        if resets == self.answered:
+            return b""
+        self.answered = resets
+        return self.banners[min(resets, len(self.banners)) - 1]
+
+
+@pytest.fixture
+def listen(monkeypatch):
+    for name, value in (("DOWNLOAD_LISTEN_S", 0.01), ("APP_LISTEN_S", 0.01),
+                        ("MANUAL_BOOT_WINDOW_S", 5.0), ("APP_BOOT_WINDOW_S", 5.0)):
+        monkeypatch.setattr(esp32_flash, name, value)
+
+
+def test_manual_boot_resets_until_boot_is_held_then_until_the_app_boots(fast, listen, tmp_path):
+    driver = FakeDriver()
+    rom = FakeRom(driver, [ROM_APP, ROM_APP, ROM_DOWNLOAD, ROM_DOWNLOAD, ROM_APP])
+    write = esptool(driver)
+
+    def esptool_with_the_port_free(command, **kwargs):
+        assert rom.opened == rom.closed == 1  # the flasher let go of the UART before esptool
+        return write(command, **kwargs)
+
+    result = esp32_flash.flash(driver, [(APP, image(tmp_path))], "/dev/serial0", boot_pin=None,
+                               run=esptool_with_the_port_free, open_serial=rom)
+    pulses = [index for index, call in enumerate(driver.calls) if call == ("write", 25, 1)]
+    (esptool_at,) = [index for index, call in enumerate(driver.calls) if call[0] == "esptool"]
+    assert len(pulses) == 5 and pulses[2] < esptool_at < pulses[3]  # flashed after the third reset
+    assert (result["boot_resets"], result["app_booted"]) == (3, True)
+    assert result["boot_log"].endswith("BOOT OK\r\n") and rom.opened == rom.closed == 2
+    assert all(call[1] != 24 for call in driver.calls if call[0] != "esptool")
+    assert driver.calls[-1] == ("set_mode", 25, "disabled", 0)
+
+
+def test_manual_boot_gives_up_when_boot_is_never_held(fast, listen, monkeypatch, tmp_path):
+    monkeypatch.setattr(esp32_flash, "MANUAL_BOOT_WINDOW_S", 0.05)
+    driver = FakeDriver()
+    with pytest.raises(RuntimeError, match="did not enter download mode within 0 s: hold its BOOT"):
+        esp32_flash.flash(driver, [(APP, image(tmp_path))], "/dev/serial0", boot_pin=None,
+                          run=esptool(driver), open_serial=FakeRom(driver, [ROM_APP]))
+    assert not [call for call in driver.calls if call[0] == "esptool"]
+    assert driver.calls[-1] == ("set_mode", 25, "disabled", 0)
+
+
+def test_manual_boot_reports_an_app_that_never_booted(fast, listen, monkeypatch, tmp_path):
+    monkeypatch.setattr(esp32_flash, "APP_BOOT_WINDOW_S", 0.05)
+    driver = FakeDriver()
+    result = esp32_flash.flash(driver, [(APP, image(tmp_path))], "/dev/serial0", boot_pin=None,
+                               run=esptool(driver), open_serial=FakeRom(driver, [ROM_DOWNLOAD]))
+    assert result["flashed"] and (result["app_booted"], result["boot_log"]) == (False, "")

@@ -258,8 +258,9 @@ def test_led_commands_reuse_the_port_and_parse_replies():
         tools.call("led", state="blink", hz=99)
     assert err.value.code == "dut_error" and err.value.msg == "ERR LED hz must be 0..50"
     assert fake.sent("uart.open") == [{"tx": 14, "rx": 15, "baud": 115200}]
-    assert [w["data"] for w in fake.sent("uart.write")] == [b"LED BLINK 5\n", b"LED BLINK 2\n", b"LED BLINK 0.5\n",
-                                                            b"LED OFF\n", b"LED BLINK 99\n"]
+    commands = [b"LED BLINK 5\n", b"LED BLINK 2\n", b"LED BLINK 0.5\n", b"LED OFF\n", b"LED BLINK 99\n"]
+    # each command is preceded by a bare newline that ends any partial line left in the firmware
+    assert [w["data"] for w in fake.sent("uart.write")] == [b for c in commands for b in (b"\n", c)]
 
 
 def test_stale_uart_input_is_flushed_before_a_command():
@@ -269,6 +270,45 @@ def test_stale_uart_input_is_flushed_before_a_command():
     fake.rx[port] += b"ERR unknown command\r\n" * 400  # more than one read's worth
     assert tools.call("led", state="on") == {"reply": "OK LED ON", "port": port, "command": "LED ON"}
     assert len(fake.sent("uart.open")) == 1
+
+
+def test_a_partial_line_in_the_firmware_is_ended_before_the_command():
+    fake, _, tools = rig()
+    fake.replies = {b"\n": b"ERR unknown command\r\n", b"LED ON\n": b"OK LED ON\r\n"}
+    assert tools.call("led", state="on")["reply"] == "OK LED ON"
+    assert [w["data"] for w in fake.sent("uart.write")] == [b"\n", b"LED ON\n"]
+
+
+def test_a_command_lost_to_line_noise_is_sent_once_more(monkeypatch):
+    fake, _, tools = rig()
+    answers = iter([b"ERR unknown command\r\n", b"OK LED 5\r\n"])
+
+    def uart_write(port, data):
+        if data == b"LED BLINK 5\n":
+            fake.rx[port] += next(answers)
+        return {"n": len(data)}
+
+    monkeypatch.setattr(fake, "op_uart_write", uart_write)
+    assert tools.call("led", state="blink", hz=5)["reply"] == "OK LED 5"
+    fake.replies = {b"LED BLINK 99\n": b"ERR LED hz must be 0..50\r\n"}
+    monkeypatch.undo()
+    with pytest.raises(ToolError) as err:  # a real refusal is not retried
+        tools.call("led", state="blink", hz=99)
+    assert err.value.msg == "ERR LED hz must be 0..50"
+    assert [w["data"] for w in fake.sent("uart.write")].count(b"LED BLINK 99\n") == 1
+
+
+def test_manual_boot_flash_says_hold_boot_and_takes_the_banner_from_the_boot_log(monkeypatch):
+    fake, session, tools = rig()
+    cached_build(monkeypatch, [(0x10000, b"\xe9app")])
+    monkeypatch.setattr(fake, "op_flash_run", lambda **_: {
+        "flashed": True, "seconds": 9.0, "images": [], "uart_closed": [], "boot_resets": 2,
+        "app_booted": True, "boot_log": "boot:0x13 (SPI_FAST_FLASH_BOOT)\r\nBOOT OK\r\n"})
+    result = tools.call("program_esp32", build=False, manual_boot=True)
+    assert (result["boot_ok"], result["app_booted"], result["boot_resets"]) == (True, True, 2)
+    assert "boot_log" not in result
+    notes = [e["text"] for e in session.events if e["kind"] == "note" and e["actor"] == "system"]
+    assert any("hold its BOOT button" in note for note in notes)
 
 
 def test_led_without_a_reply_times_out():

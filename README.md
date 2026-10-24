@@ -222,7 +222,7 @@ The edge-case is a held fault vector, not a sub-millisecond glitch generator.
 pip install -e '.[llm]'
 export OPENAI_API_KEY=...  # never put credentials in source
 # Optional OPENAI_BASE_URL for an OpenAI-compatible endpoint
-aperture-agent --llm --model gpt-4o-mini
+aperture-agent --llm --model gpt-5.1
 ```
 
 The legacy CLI loop exposes `stimulate_hardware`, `read_hardware_state`,

@@ -211,3 +211,29 @@ def test_sse_feed_cursor_and_last_event_id(client, app):
     assert [e["cursor"] for e in events] == list(range(1, total + 1))
     resumed = read_sse("/api/events", headers={"Last-Event-ID": str(total - 2)}, limit=1.0)
     assert [e["cursor"] for e in resumed][:2] == [total - 1, total]
+
+
+def test_state_and_events_stay_live_while_a_tool_call_holds_the_console(app):
+    app.connect({"transport": "virtual", "scenario": "button_led", "realtime": True})
+    cursor = app.state()["cursor"]
+    holding, done = threading.Event(), threading.Event()
+
+    def flash_for_minutes():  # a firmware build and flash, as the console sees it
+        with app.lock:
+            app.session.note("flashing", "system")
+            holding.set()
+            done.wait(10)
+
+    worker = threading.Thread(target=flash_for_minutes)
+    worker.start()
+    try:
+        assert holding.wait(5)
+        started = time.monotonic()
+        state = app.state()
+        assert time.monotonic() - started < 2 and state["busy"] is True
+        assert state["connection"]["connected"] is True  # the last full view
+        assert "flashing" in [e.get("text") for e in app.events_since(cursor)]
+    finally:
+        done.set()
+        worker.join()
+    assert app.state()["busy"] is False

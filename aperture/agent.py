@@ -15,7 +15,7 @@ from .protocol import _jsonable
 from .tools import ToolError, schemas
 from .transport.base import TransportError
 
-DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_MODEL = "gpt-5.1"         # fastest model that passed every ESP32 LED / flash prompt in a live check
 MAX_TURNS = 12
 MAX_RESULT_CHARS = 6000          # per tool result; list_pins on a full header is ~4.3 KB
 OPENAI_TIMEOUT_S = 60.0
@@ -36,11 +36,23 @@ SYSTEM_PROMPT = (
     "line: 'LCD <line1>|<line2>', 'LED BLINK <hz>' (0 < hz <= 50), 'LED ON', 'LED OFF'; replies "
     "start with OK or ERR. It also runs the safety controller (trigger, PWM and fault drive the "
     "actuator and safety relay) and prints a JSON telemetry line every 200 ms.\n"
+    "PIN NUMBERS: every pin argument of a tool is a Raspberry Pi BCM GPIO number. ESP32 pin names "
+    "(D4, D13, 'GPIO13 on the ESP32', the LCD pins) are NOT Pi pins and must never be passed to "
+    "set_mode, write, read, pulse, pwm, wait_for or request_wiring. The only wired Pi pins are GPIO17, "
+    "18, 27 (Pi drives ESP32 D4, D5, D18), GPIO22, 23 (Pi reads ESP32 D19, D21), GPIO14/15 (UART0 to "
+    "the ESP32), GPIO25 (EN) and GPIO24 (BOOT); never request wiring for any other Pi pin.\n"
+    "THE STATUS LED AND THE LCD ARE ON THE ESP32, not on the Pi header: the Pi cannot drive them with "
+    "pin tools. Control them only with led (blink / on / off over UART) and lcd_print. The status LED "
+    "is a single-colour LED; its colour cannot be changed, so say so if asked for a colour and still "
+    "blink it. To program, flash or code the ESP32 (e.g. 'program the ESP32 to blink the LED'), call "
+    "program_esp32 with manual_boot=true (this bench has no BOOT wire), telling the human beforehand "
+    "to press and hold the ESP32 BOOT button for a few seconds when flashing starts; then call led.\n"
     "Rules:\n"
     "- Act only through the tools and never invent measurements; report only what tool results "
     "show.\n"
-    "- If a tool returns wiring_required, stop and ask the human to confirm that wire "
-    "(request_wiring can label it with the ESP32 pin); never work around it.\n"
+    "- If a tool returns wiring_required, stop and ask the human to confirm those wires (the "
+    "confirm buttons in the session log, or 'Confirm bench wiring' in the DUT panel) and then send "
+    "the request again; never work around it.\n"
     "- To make the LED blink call led; if the DUT firmware may not be loaded, or the user asks to "
     "program, flash or code the ESP32, call program_esp32 first. To show text call lcd_print.\n"
     "- For tests, drive the inputs, check with assertions (assert_pin, assert_frequency, "
@@ -54,7 +66,9 @@ def run_agent(tools, text: str, context: dict, *, client=None, model: str | None
               max_turns: int = MAX_TURNS) -> dict:
     """Answer one prompt: ``{"reply": str, "results": [{tool, ok, result | error}, ...]}``.
 
-    ``tools`` is anything with ``call(name, **args)``. A model API error propagates while no
+    ``tools`` is a tool backend (``schemas()`` plus ``call(name, args)``, e.g. an MCP client) or
+    the console's in-process ``Tools`` (``call(name, **args)``), which is adapted with
+    ``LocalTools``. A model API error propagates while no
     tool has run, so the console can fall back to its offline interpreter; after a tool has
     run the agent stops and reports instead, so a fallback never repeats hardware actions.
     """
@@ -62,7 +76,8 @@ def run_agent(tools, text: str, context: dict, *, client=None, model: str | None
         with _default_client() as owned:
             return run_agent(tools, text, context, client=owned, model=model, max_turns=max_turns)
     model = model or os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL
-    specs = _openai_tools()
+    backend = as_backend(tools)
+    specs = _openai_tools(backend.schemas())
     messages = [{"role": "system", "content": system_prompt(context)},
                 {"role": "user", "content": text}]
     results: list[dict] = []
@@ -80,7 +95,7 @@ def run_agent(tools, text: str, context: dict, *, client=None, model: str | None
         if not calls:
             return {"reply": (message.content or "").strip() or NO_ANSWER, "results": results}
         for call in calls:
-            entry = _execute(tools, call)
+            entry = _execute(backend, call)
             results.append(entry)
             messages.append({"role": "tool", "tool_call_id": call.id,
                              "content": json.dumps(entry, separators=(",", ":"))})
@@ -98,9 +113,28 @@ def _default_client():
     return OpenAI(timeout=OPENAI_TIMEOUT_S, max_retries=OPENAI_MAX_RETRIES)
 
 
-def _openai_tools() -> list[dict]:
-    """``schemas()`` in a form the API accepts: it rejects an array schema without ``items``."""
-    return [_with_items(spec) for spec in schemas()]
+class LocalTools:
+    """The agent's tool seam over the in-process ``Tools``: ``schemas()`` and ``call(name, args)``.
+    An MCP-backed implementation of the same two methods can replace it without touching the
+    agent loop."""
+
+    def __init__(self, tools):
+        self.tools = tools
+
+    def schemas(self) -> list[dict]:
+        return schemas()
+
+    def call(self, name: str, args: dict) -> dict:
+        return self.tools.call(name, **args)
+
+
+def as_backend(tools):
+    return tools if callable(getattr(tools, "schemas", None)) else LocalTools(tools)
+
+
+def _openai_tools(specs: list[dict]) -> list[dict]:
+    """Tool schemas in a form the API accepts: it rejects an array schema without ``items``."""
+    return [_with_items(spec) for spec in specs]
 
 
 def _with_items(node):
@@ -125,7 +159,7 @@ def _assistant_message(message, calls: list) -> dict:
                                   for call in calls]}
 
 
-def _execute(tools, call) -> dict:
+def _execute(backend, call) -> dict:
     """Run one tool call; every failure becomes an error entry the model can read."""
     name = call.function.name
     try:
@@ -135,7 +169,7 @@ def _execute(tools, call) -> dict:
     if not isinstance(args, dict):
         return _failure(name, "bad_request", "arguments must be a JSON object")
     try:
-        return {"tool": name, "ok": True, "result": _json_safe(tools.call(name, **args))}
+        return {"tool": name, "ok": True, "result": _json_safe(backend.call(name, args))}
     except ToolError as exc:
         return {"tool": name, "ok": False,
                 "error": _json_safe({"code": exc.code, "msg": exc.msg, **exc.extra})}

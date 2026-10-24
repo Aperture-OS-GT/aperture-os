@@ -245,7 +245,10 @@ class HardwareExecutor(BusOps, FlashOps):
 
     # --- stream ---------------------------------------------------------------------------
     def _op_stream_set(self, r):
-        pins = [self._pin(bcm) for bcm in r["pins"]]
+        # Bus- and flash-owned pins cannot be watched without taking them from their owner: they
+        # are skipped and named, so "stream the whole header" still streams every other GPIO.
+        skipped = {bcm: self.reserved[bcm] for bcm in r["pins"] if bcm in self.reserved}
+        pins = [self._pin(bcm) for bcm in r["pins"] if bcm not in skipped]
         for pin in pins:
             if r["on"]:
                 self.streams.add(pin.bcm)
@@ -253,7 +256,10 @@ class HardwareExecutor(BusOps, FlashOps):
             else:
                 self.streams.discard(pin.bcm)
             self._sync_watch(pin)
-        return {"pins": sorted(self.streams)}
+        reply = {"pins": sorted(self.streams)}
+        if skipped:
+            reply["skipped"] = [{"pin": bcm, "reserved": owner} for bcm, owner in sorted(skipped.items())]
+        return reply
 
     def _sync_watch(self, pin: HwPin) -> None:
         wanted = pin.bcm in self.streams and pin.mode in P.INPUT_MODES
