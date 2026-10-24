@@ -41,7 +41,7 @@ class Session:
                  session_id: str | None = None):
         now = datetime.now(timezone.utc)
         self.id = session_id or f"s_{now:%Y%m%d_%H%M%S}_{secrets.token_hex(2)}"
-        self.created_at = now.isoformat(timespec="seconds")
+        self.created_at = now.isoformat(timespec="milliseconds")
         self.actor = actor
         self.home = Path(home) if home else home_dir()
         self.persist = persist
@@ -325,9 +325,10 @@ def summarize(data: dict) -> dict:
 def list_sessions(home: Path | str | None = None) -> list[dict]:
     root = Path(home or home_dir()) / "sessions"
     out = []
-    for path in sorted(root.glob("*/session.json"), reverse=True):
+    for path in root.glob("*/session.json"):
         try:
-            out.append(summarize(json.loads(path.read_text(encoding="utf-8"))))
+            out.append((path.stat().st_mtime_ns, summarize(json.loads(path.read_text(encoding="utf-8")))))
         except (OSError, ValueError):
             continue
-    return out
+    out.sort(key=lambda item: (item[1]["created_at"], item[0]), reverse=True)
+    return [item[1] for item in out]
