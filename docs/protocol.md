@@ -24,6 +24,9 @@ legacy compatibility below. Unknown, extra and missing fields are rejected.
 | `read` | `pins`: nonempty unique BCM array | `pins` with optional decoded bus data |
 | `sample` | `pins`, `duration_ms`: 1..2000, `rate_hz`: 1..1000 | `samples:[{t_ms,pins}]`, final `pins` |
 | `release` | `pin` | `pins` with null direction; stops PWM, closes GPIO device |
+| `flash_begin` | `images`: 1..8 `{offset,size,sha256}` within 4 MiB total | `staged`; esp32_safety profile only |
+| `flash_chunk` | `index`, `data`: base64 up to 48 KiB, appended in order | `index,received,size` |
+| `flash_run` | `baud`: 115200/230400/460800/921600, `boot_pin`: BCM or null (manual BOOT), `en_pin`: BCM | `flashed,seconds,build_tag,images,log`, plus `pins` releasing boot/en |
 
 Response pin entries use `{pin:BCM,direction,value,duty?,decoded?}`. `list_pins`
 instead uses header objects below. Read/sample require configured pins; write/PWM
@@ -101,6 +104,12 @@ work ungated for the old UI. This explicit legacy bench mode is not the universa
 workflow. Select a profile or start `--profile ...` for wiring gating. The old UI
 artwork is ESP32-specific; redesign is a separate handoff.
 
+* `POST /api/flash` `{env: esp32dev|fixed, build?: bool, manual_boot?: bool}`: streams the
+  PlatformIO artifacts for `env` through `flash_begin/chunk/run`. Returns
+  `{status: waiting_for_connections, missing}` until TX0/RX0/EN (and BOOT unless
+  `manual_boot`) are confirmed; otherwise the `flash_run` result with `status: complete`.
+  Clears the last report. Emits `FLASH` events.
+
 ### SSE event shapes
 
 `GET /api/events`: `id:N` and `data:<JSON>`, with heartbeat comments and
@@ -114,6 +123,9 @@ Last-Event-ID replay from a bounded 1,000-event ring. Envelope:
 * `PROFILE`: data `{profile,missing,ready}` after selection.
 * `STEP`: `{step,reasoning,injected,latency_ms,pass,issues,...evidence}`.
 * `REPORT`: `{profile,mode,status,pass,steps}` or waiting report with `missing`.
+* `FLASH`: `{stage: waiting|build|start|upload|done, ...}`; `upload` carries
+  `name,offset,received,size`; `done` carries `seconds,build_tag`. `flash_chunk` `TX` events
+  replace `data` with a size placeholder.
 * `USER`/`AGENT`: `{reply:text}`; `ERROR`: `{error:text}`.
 * `TX`: raw command, envelope latency null; `RX`: raw response with measured
   round-trip envelope latency_ms. Samples/decoded evidence are included in RX.
@@ -163,5 +175,6 @@ on timeout. Simulated reads are immediate and preserve the relay's previous stat
 `run_vector` applies all three inputs before reading; real GPIO writes are sequential,
 not electrically atomic. Telemetry and digital readback are sampled near each other,
 not synchronously. Stable vectors are required. Serial startup logs and incomplete
-packets are ignored until a valid JSON telemetry packet arrives. No shell execution,
-firmware flashing or remote code execution command is exposed.
+packets are ignored until a valid JSON telemetry packet arrives. No shell execution or
+remote code execution command is exposed: `flash_run` only invokes `esptool` with staged,
+SHA-256-verified images on the daemon's configured serial port and discards them afterwards.

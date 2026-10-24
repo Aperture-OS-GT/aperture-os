@@ -1,14 +1,16 @@
 {
   "id": "esp32_safety", "component": "ESP32 safety controller",
-  "notes": "3.3V logic, shared ground required. Telemetry via Pi header UART, never USB.",
+  "notes": "3.3V logic, shared ground required. UART0 (TX0/RX0) carries telemetry and esptool flashing over the Pi header, never USB. EN and BOOT wires are only needed to flash.",
   "wires": [
     {"pi_pin":17,"dut_pin":"GPIO4","direction":"tx","label":"Trigger"},
     {"pi_pin":18,"dut_pin":"GPIO5","direction":"tx","label":"100 Hz PWM"},
     {"pi_pin":27,"dut_pin":"GPIO18","direction":"tx","label":"Fault"},
     {"pi_pin":22,"dut_pin":"GPIO19","direction":"rx","label":"Actuator"},
     {"pi_pin":23,"dut_pin":"GPIO21","direction":"rx","label":"Safety relay"},
-    {"pi_pin":15,"dut_pin":"GPIO17 TX2","direction":"rx","label":"UART telemetry RX"},
-    {"pi_pin":14,"dut_pin":"GPIO16 RX2","direction":"tx","label":"UART TX"}
+    {"pi_pin":15,"dut_pin":"TX0","direction":"rx","label":"UART0 telemetry + flash RX"},
+    {"pi_pin":14,"dut_pin":"RX0","direction":"tx","label":"UART0 flash TX"},
+    {"pi_pin":25,"dut_pin":"EN","direction":"tx","label":"Reset pulse for flashing","optional":true},
+    {"pi_pin":24,"dut_pin":"BOOT (GPIO0)","direction":"tx","label":"Bootloader select for flashing","optional":true}
   ],
   "tests": [
     {"name":"Nominal Operation","vector":{"trig":1,"pwm":0.3,"fault":0},"expect":{"state":"ACTIVE_DRIVE","actuator":1,"safety":1}},

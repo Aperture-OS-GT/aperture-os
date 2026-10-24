@@ -11,6 +11,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from agent.client import Client
+from agent.flash import FLASH_PINS, build, flash, required_pins, simulated_images
+from agent.flash import images as load_images
 from agent.generic_tools import GenericTools
 from agent.planner import run_llm, run_offline, verify
 from agent.profiles import checked, run_profile
@@ -27,7 +29,8 @@ class LoggedClient:
 
     def command(self, **command):
         start = time.perf_counter()
-        self.app.emit("TX", command)
+        self.app.emit("TX", {**command, "data": f"<{len(command['data'])} base64 chars>"}
+                      if command.get("cmd") == "flash_chunk" else command)
         try:
             result = self.client.command(**command)
         except Exception as exc:
@@ -133,6 +136,41 @@ class ConsoleApp:
         self.emit("REPORT", self.report)
         return self.report
 
+    def flash(self, data):
+        env = data.get("env", "esp32dev")
+        manual = bool(data.get("manual_boot", False))
+        if not self.wiring.profile or self.wiring.profile["id"] != "esp32_safety":
+            raise ValueError("select the ESP32 safety profile and confirm its wiring before flashing")
+        missing = [pin for pin in required_pins(manual)
+                   if not self.wiring.header.gpio(pin)["connected"]]
+        if missing:
+            self.emit("FLASH", {"stage": "waiting", "env": env, "missing": missing})
+            return {"status": "waiting_for_connections", "pass": False, "env": env,
+                    "missing": missing}
+        if data.get("build"):
+            self.emit("FLASH", {"stage": "build", "env": env})
+            build(env)
+        try:
+            images = load_images(env)
+        except ValueError:
+            if self.config.get("mode") != "sim":
+                raise
+            # No PlatformIO build on this laptop: rehearse against the simulated harness.
+            images = simulated_images(env)
+            self.emit("FLASH", {"stage": "simulated", "env": env})
+        self.emit("FLASH", {"stage": "start", "env": env, "manual_boot": manual,
+                            "images": [{"name": i.get("name"), "offset": i["offset"],
+                                        "size": len(i["data"])} for i in images]})
+        with self.client() as raw:
+            result = flash(LoggedClient(raw, self), images,
+                           boot_pin=None if manual else FLASH_PINS["boot"],
+                           progress=lambda p: self.emit("FLASH", p))
+        self.report = None
+        result = {**result, "status": "complete", "env": env}
+        self.emit("FLASH", {"stage": "done", "env": env, "seconds": result["seconds"],
+                            "build_tag": result.get("build_tag")})
+        return result
+
     def connection_request(self, data):
         pin = data.get("pi_pin")
         self.wiring.header.gpio(pin)
@@ -165,6 +203,15 @@ class ConsoleApp:
                 request = self.connection_request(command)
                 self.emit("AGENT", {"reply": reply})
                 return {"reply": reply, "request": request, "report": None}
+            if command and command.get("action") == "flash":
+                result = self.flash(command)
+                if result["status"] == "complete":
+                    reply += f" Done in {result['seconds']} s: {result.get('build_tag') or 'flashed'}."
+                else:
+                    reply = ("Flashing needs confirmed wires on Pi GPIO "
+                             f"{result['missing']} first (TX0/RX0, EN, BOOT).")
+                self.emit("AGENT", {"reply": reply})
+                return {"reply": reply, "report": None, "flash": result}
             if command and command.get("action") == "test_profile":
                 if not self.wiring.profile or self.wiring.profile["id"] != command["profile"]:
                     self.select_profile(command["profile"])
@@ -287,7 +334,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path not in ("/api/prompt", "/api/connect", "/api/requests",
                              "/api/requests/confirm", "/api/requests/reject",
-                             "/api/profiles/select", "/api/profiles/run", "/api/gpio"):
+                             "/api/profiles/select", "/api/profiles/run", "/api/gpio",
+                             "/api/flash"):
             self.send(404, {"error": "not found"})
             return
         if not app.lock.acquire(blocking=False):
@@ -312,6 +360,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = app.select_profile(data.get("profile"))
             elif self.path == "/api/profiles/run":
                 result = app.run_selected()
+            elif self.path == "/api/flash":
+                result = app.flash(data)
             elif self.path == "/api/gpio":
                 with app.client() as raw:
                     tools = GenericTools(LoggedClient(raw, app), app.wiring)

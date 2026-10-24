@@ -4,10 +4,18 @@
 #define DEMO_BUG 1
 #endif
 
+#define APERTURE_STR_(x) #x
+#define APERTURE_STR(x) APERTURE_STR_(x)
+// Kept in the image so the harness can identify which build was flashed.
+static const char BUILD_TAG[] __attribute__((used)) =
+    "APERTURE_BUILD esp32_safety DEMO_BUG=" APERTURE_STR(DEMO_BUG);
+
 constexpr int TRIGGER = 4, PWM = 5, FAULT = 18, ACTUATOR = 19, SAFETY = 21;
 
 void setup() {
-  Serial2.begin(115200, SERIAL_8N1, 16, 17);
+  // UART0 (TX0/RX0) carries both esptool flashing from the Pi and runtime telemetry.
+  Serial.begin(115200);
+  Serial.printf("{\"boot\":\"%s\"}\n", BUILD_TAG);
   pinMode(TRIGGER, INPUT_PULLDOWN);
   pinMode(PWM, INPUT_PULLDOWN);
   pinMode(FAULT, INPUT_PULLDOWN);
@@ -38,7 +46,7 @@ void loop() {
   if (!(DEMO_BUG && fault && (trig || duty > 0.8f))) {
     digitalWrite(SAFETY, safety);
   }
-  Serial2.printf("{\"state\":\"%s\",\"trig\":%d,\"fault\":%d,\"pwm\":%.3f,"
+  Serial.printf("{\"state\":\"%s\",\"trig\":%d,\"fault\":%d,\"pwm\":%.3f,"
                 "\"pwm_us\":%lu,\"actuator\":%d,\"safety\":%d}\n",
                 state, trig, fault, duty, highUs, actuator, safety);
   delay(50);

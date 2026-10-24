@@ -13,6 +13,13 @@
     <select id="profile"><option value="esp32_safety">ESP32 safety</option><option value="mpu6050_gyro">Gyroscope</option><option value="display">Display</option></select>
     <p id="profileNote">GPIO-only verification.<br>Human wiring, machine evidence.</p>
   </div>
+  <div class="profile-section flash-section"><label for="flashEnv">ESP32 FIRMWARE · VIA PI UART</label>
+    <select id="flashEnv"><option value="esp32dev">DEMO_BUG build (esp32dev)</option><option value="fixed">Fixed build</option></select>
+    <label class="check"><input id="flashBuild" type="checkbox"> Build with PlatformIO first</label>
+    <label class="check"><input id="flashManual" type="checkbox"> No BOOT wire — I’ll hold BOOT</label>
+    <button id="flash">⚡ Flash over GPIO14/15 + EN/BOOT</button>
+    <p id="flashNote">Needs confirmed wires: TX0, RX0, EN, BOOT.</p>
+  </div>
   <div class="sidebar-foot"><span class="online-dot"></span> All systems local<br><small>No cloud. No assumptions.</small></div>
 </aside>
 <main class="conversation">
@@ -25,7 +32,7 @@
   <section id="chat" class="chat" aria-label="Session transcript" aria-live="polite"></section>
   <section id="verdict" class="verdict" hidden></section>
   <div class="composer-area"><div id="activity">● Ready for your next experiment</div><form id="promptForm"><textarea id="prompt" rows="2" aria-label="Hardware instruction" placeholder="What would you like to test?"></textarea><div class="composer-footer"><span>Ask. Connect. Verify.</span><button id="send" type="submit" aria-label="Send instruction">↑</button></div></form>
-    <div class="chips"><button data-prompt="Test the gyroscope">✧ Test the gyroscope</button><button data-prompt="Run ESP32 safety plan">Run ESP32 safety plan</button><button data-prompt="Test display">Test display</button><button data-prompt="Read pin 24">Read pin 24</button><button id="reset">↺ Reset</button></div>
+    <div class="chips"><button data-prompt="Test the gyroscope">✧ Test the gyroscope</button><button data-prompt="Run ESP32 safety plan">Run ESP32 safety plan</button><button data-prompt="Test display">Test display</button><button data-prompt="Read pin 24">Read pin 24</button><button data-prompt="Flash the fixed firmware">⚡ Flash fixed firmware</button><button id="reset">↺ Reset</button></div>
     <div class="composer-note">3.3V logic only · Confirm wiring with power disconnected · Shared ground required</div>
   </div>
 </main>
@@ -39,5 +46,5 @@
   <a id="export" class="export" href="/api/report" download="aperture-report.json">↓ Export JSON report <span>↗</span></a>
 </aside>
 </div>
-<details class="debug" id="debug"><summary><span>›_ Wire log <small>RAW EVENT STREAM</small></span><span id="eventCount">0 events ⌃</span></summary><div class="debug-toolbar"><select id="filter" aria-label="Log level"><option>ALL</option><option>TX</option><option>RX</option><option>REQUEST</option><option>PIN_STATE</option><option>PROFILE</option><option>AGENT</option><option>ERROR</option></select><button id="pause">Ⅱ Pause</button><button id="clear">Clear</button></div><div id="logs" class="logs" role="log"></div></details>
+<details class="debug" id="debug"><summary><span>›_ Wire log <small>RAW EVENT STREAM</small></span><span id="eventCount">0 events ⌃</span></summary><div class="debug-toolbar"><select id="filter" aria-label="Log level"><option>ALL</option><option>TX</option><option>RX</option><option>REQUEST</option><option>PIN_STATE</option><option>PROFILE</option><option>FLASH</option><option>AGENT</option><option>ERROR</option></select><button id="pause">Ⅱ Pause</button><button id="clear">Clear</button></div><div id="logs" class="logs" role="log"></div></details>
 <script src="/app.js"></script></body></html>

@@ -18,7 +18,10 @@ def run_profile(client, wiring, display=None):
                 "pass": False, "missing": missing, "steps": []}
     profile = wiring.profile
     for wire in profile["wires"]:
-        checked(client, cmd="configure_pin", pin=wire["pi_pin"], direction=wire["direction"])
+        # Optional flash-control wires (EN/BOOT) idle via the DUT's pull-ups; a configured
+        # output would start LOW and hold the ESP32 in reset or in its bootloader.
+        if not wire.get("optional"):
+            checked(client, cmd="configure_pin", pin=wire["pi_pin"], direction=wire["direction"])
     rows = []
     try:
         for test in profile["tests"]:

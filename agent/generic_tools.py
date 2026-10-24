@@ -1,4 +1,5 @@
 """Bounded agent tools: only a human endpoint may confirm wiring."""
+from agent.flash import ENVS, FLASH_PINS, flash, images, required_pins
 from agent.profiles import checked, run_profile
 
 
@@ -21,6 +22,10 @@ class GenericTools:
             ("run_profile", "Run selected profile only when all required wires are confirmed", {}),
             ("configure_pin", "Configure a human-confirmed connection",
              {"pin": {"type": "integer"}, "direction": {"type": "string", "enum": ["tx", "rx"]}}),
+            ("flash_firmware", ("Flash a prebuilt ESP32 image over the Pi header UART (TX0/RX0, "
+                                "EN, BOOT must be confirmed); esp32dev has the planted bug, "
+                                "fixed does not"),
+             {"env": {"type": "string", "enum": list(ENVS)}}),
         ]
         self.schemas = [{"type": "function", "function": {"name": name, "description": desc,
                          "parameters": {"type": "object", "properties": props,
@@ -92,6 +97,18 @@ class GenericTools:
 
     def run_profile(self):
         return self.record(run_profile(self.client, self.wiring, self.display))
+
+    def flash_firmware(self, env):
+        if not self.wiring.profile or self.wiring.profile["id"] != "esp32_safety":
+            raise ValueError("select the esp32_safety profile before flashing")
+        manual = not self.wiring.header.gpio(FLASH_PINS["boot"])["connected"]
+        missing = [pin for pin in required_pins(manual)
+                   if not self.wiring.header.gpio(pin)["connected"]]
+        if missing:
+            return self.record({"pass": False, "status": "waiting_for_connections",
+                                "missing": missing, "env": env})
+        result = flash(self.client, images(env), boot_pin=None if manual else FLASH_PINS["boot"])
+        return self.record({**result, "env": env, "status": "complete"})
 
     def cleanup(self):
         # Outputs stay under the selected profile's explicit control; no legacy GPIO writes.

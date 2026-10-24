@@ -2,6 +2,7 @@
 import math
 import time
 
+from pi.flash import Flasher
 from pi.header import GPIO_PINS
 
 
@@ -16,6 +17,33 @@ class GenericGPIO:
         self.uart = None
         self.tick = 0
         self.gyro_decoded = None
+        self.flasher = Flasher(self.is_real, getattr(self, "serial_port", None))
+
+    def flash_begin(self, images):
+        if self.profile != "esp32_safety":
+            raise ValueError("flashing is only defined for the esp32_safety profile")
+        return self.flasher.begin(images)
+
+    def flash_chunk(self, index, data):
+        return self.flasher.chunk(index, data)
+
+    def flash_run(self, baud, boot_pin, en_pin):
+        if self.profile != "esp32_safety":
+            raise ValueError("flashing is only defined for the esp32_safety profile")
+        # esptool owns UART0 while writing; EN/BOOT must not be held low by stale outputs.
+        for pin in (boot_pin, en_pin):
+            if pin is not None:
+                self.release(pin)
+        if self.uart:
+            self.uart.close()
+            self.uart = None
+        self.flasher.serial_port = getattr(self, "serial_port", None)
+        result = self.flasher.run(baud, boot_pin, en_pin)
+        self.on_flashed(result)
+        return result
+
+    def on_flashed(self, result):
+        pass
 
     def select_profile(self, profile):
         self.close_gpio()
@@ -157,6 +185,7 @@ class GenericGPIO:
     def close_gpio(self):
         for pin in list(self.gpio_config):
             self.release(pin)
+        self.flasher.abort()
         if self.bus:
             self.bus.close()
             self.bus = None

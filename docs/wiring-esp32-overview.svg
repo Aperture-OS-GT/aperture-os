@@ -1,0 +1,234 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1000" viewBox="0 0 1500 1000" font-family="Inter, Helvetica, Arial, sans-serif" font-size="13">
+<rect width="1500" height="1000" fill="#fafafa"/>
+<text x="30" y="40" font-size="26" fill="#111827" text-anchor="start" font-weight="bold" >Aperture OS demo — ESP32 wiring (8 wires + 2 indicator LEDs)</text>
+<text x="30" y="64" font-size="13" fill="#4b5563" text-anchor="start" font-weight="normal" >Pi pins are BCM GPIO; (pin N) is the physical header position. 3.3 V logic only. 330 Ω–1 kΩ resistor in series on every signal wire. Wire with both boards powered off.</text>
+<rect x="30" y="90" width="200" height="70" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="2"/>
+<text x="42" y="114" font-size="15" fill="#111827" text-anchor="start" font-weight="bold" >Laptop</text>
+<text x="42" y="134" font-size="12" fill="#374151" text-anchor="start" font-weight="normal" >aperture-ui (browser + agent)</text>
+<rect x="400" y="90" width="220" height="70" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+<text x="412" y="114" font-size="15" fill="#111827" text-anchor="start" font-weight="bold" >Raspberry Pi</text>
+<text x="412" y="134" font-size="12" fill="#374151" text-anchor="start" font-weight="normal" >aperture-daemon, GPIO harness</text>
+<rect x="800" y="90" width="240" height="70" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+<text x="812" y="114" font-size="15" fill="#111827" text-anchor="start" font-weight="bold" >ESP32 DevKit (DUT)</text>
+<text x="812" y="134" font-size="12" fill="#374151" text-anchor="start" font-weight="normal" >firmware/esp32, DEMO_BUG build</text>
+<line x1="230" y1="125" x2="400" y2="125" stroke="#6366f1" stroke-width="3" stroke-dasharray="8 6"/>
+<text x="315" y="112" font-size="12" fill="#4338ca" text-anchor="middle" font-weight="normal" >Bluetooth RFCOMM (or Wi-Fi TCP)</text>
+<line x1="620" y1="125" x2="800" y2="125" stroke="#059669" stroke-width="3"/>
+<text x="710" y="112" font-size="12" fill="#047857" text-anchor="middle" font-weight="normal" >8 jumper wires via 40-pin header</text>
+<text x="1060" y="112" font-size="12" fill="#7f1d1d" text-anchor="start" font-weight="normal" >ESP32 powered by its own USB charger / power bank.</text>
+<text x="1060" y="128" font-size="12" fill="#7f1d1d" text-anchor="start" font-weight="normal" >Never from a Pi GPIO. USB data cable unplugged</text>
+<text x="1060" y="144" font-size="12" fill="#7f1d1d" text-anchor="start" font-weight="normal" >during the run (only plug in to flash).</text>
+<rect x="652" y="175" width="170" height="482" rx="6" fill="#1f2937"/>
+<text x="727" y="193" font-size="12" fill="#f9fafb" text-anchor="middle" font-weight="bold" >Pi J8 header</text>
+<rect x="690" y="205" width="20" height="20" rx="4" fill="#fecaca" stroke="#9ca3af"/>
+<text x="700" y="219" font-size="10" fill="#111" text-anchor="middle" font-weight="bold" >1</text>
+<text x="685" y="219" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >3V3</text>
+<rect x="744" y="205" width="20" height="20" rx="4" fill="#fecaca" stroke="#9ca3af"/>
+<text x="754" y="219" font-size="10" fill="#111" text-anchor="middle" font-weight="bold" >2</text>
+<text x="769" y="219" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >5V</text>
+<rect x="690" y="227" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="700" y="241" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >3</text>
+<text x="685" y="241" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GPIO2</text>
+<rect x="744" y="227" width="20" height="20" rx="4" fill="#fecaca" stroke="#9ca3af"/>
+<text x="754" y="241" font-size="10" fill="#111" text-anchor="middle" font-weight="bold" >4</text>
+<text x="769" y="241" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >5V</text>
+<rect x="690" y="249" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="700" y="263" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >5</text>
+<text x="685" y="263" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GPIO3</text>
+<rect x="744" y="249" width="20" height="20" rx="4" fill="#111827" stroke="#9ca3af"/>
+<text x="754" y="263" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >6</text>
+<text x="769" y="263" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GND</text>
+<line x1="814" y1="259" x2="1030" y2="259" stroke="#111827" stroke-width="3"/>
+<text x="1038" y="263" font-size="12" fill="#111827" text-anchor="start" font-weight="bold" >GND  →  breadboard ground rail</text>
+<rect x="690" y="271" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="700" y="285" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >7</text>
+<text x="685" y="285" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GPIO4</text>
+<rect x="744" y="271" width="20" height="20" rx="4" fill="#7c3aed" stroke="#9ca3af"/>
+<text x="754" y="285" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >8</text>
+<text x="769" y="285" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GPIO14</text>
+<line x1="814" y1="281" x2="1030" y2="281" stroke="#7c3aed" stroke-width="3"/>
+<rect x="908.0" y="276" width="28" height="10" fill="#fff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="922.0" y="273" font-size="8" fill="#7c3aed" text-anchor="middle" font-weight="normal" >330Ω–1kΩ</text>
+<text x="1038" y="285" font-size="12" fill="#7c3aed" text-anchor="start" font-weight="bold" >GPIO14 TXD  →  ESP32 GPIO16 RX2  (spare, optional)</text>
+<rect x="690" y="293" width="20" height="20" rx="4" fill="#d1d5db" stroke="#9ca3af"/>
+<text x="700" y="307" font-size="10" fill="#111" text-anchor="middle" font-weight="bold" >9</text>
+<text x="685" y="307" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GND</text>
+<rect x="744" y="293" width="20" height="20" rx="4" fill="#7c3aed" stroke="#9ca3af"/>
+<text x="754" y="307" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >10</text>
+<text x="769" y="307" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GPIO15</text>
+<line x1="814" y1="303" x2="1030" y2="303" stroke="#7c3aed" stroke-width="3"/>
+<rect x="908.0" y="298" width="28" height="10" fill="#fff" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="922.0" y="295" font-size="8" fill="#7c3aed" text-anchor="middle" font-weight="normal" >330Ω–1kΩ</text>
+<text x="1038" y="307" font-size="12" fill="#7c3aed" text-anchor="start" font-weight="bold" >GPIO15 RXD  ←  ESP32 GPIO17 TX2  telemetry 115200</text>
+<rect x="690" y="315" width="20" height="20" rx="4" fill="#2563eb" stroke="#9ca3af"/>
+<text x="700" y="329" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >11</text>
+<text x="685" y="329" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GPIO17</text>
+<line x1="640" y1="325" x2="340" y2="325" stroke="#2563eb" stroke-width="3"/>
+<rect x="476.0" y="320" width="28" height="10" fill="#fff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="490.0" y="317" font-size="8" fill="#2563eb" text-anchor="middle" font-weight="normal" >330Ω–1kΩ</text>
+<text x="332" y="329" font-size="12" fill="#2563eb" text-anchor="end" font-weight="bold" >GPIO17  →  ESP32 GPIO4   trigger</text>
+<rect x="744" y="315" width="20" height="20" rx="4" fill="#2563eb" stroke="#9ca3af"/>
+<text x="754" y="329" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >12</text>
+<text x="769" y="329" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GPIO18</text>
+<line x1="814" y1="325" x2="1030" y2="325" stroke="#2563eb" stroke-width="3"/>
+<rect x="908.0" y="320" width="28" height="10" fill="#fff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="922.0" y="317" font-size="8" fill="#2563eb" text-anchor="middle" font-weight="normal" >330Ω–1kΩ</text>
+<text x="1038" y="329" font-size="12" fill="#2563eb" text-anchor="start" font-weight="bold" >GPIO18  →  ESP32 GPIO5   PWM 100 Hz</text>
+<rect x="690" y="337" width="20" height="20" rx="4" fill="#2563eb" stroke="#9ca3af"/>
+<text x="700" y="351" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >13</text>
+<text x="685" y="351" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GPIO27</text>
+<line x1="640" y1="347" x2="340" y2="347" stroke="#2563eb" stroke-width="3"/>
+<rect x="476.0" y="342" width="28" height="10" fill="#fff" stroke="#2563eb" stroke-width="1.5"/>
+<text x="490.0" y="339" font-size="8" fill="#2563eb" text-anchor="middle" font-weight="normal" >330Ω–1kΩ</text>
+<text x="332" y="351" font-size="12" fill="#2563eb" text-anchor="end" font-weight="bold" >GPIO27  →  ESP32 GPIO18  fault inject</text>
+<rect x="744" y="337" width="20" height="20" rx="4" fill="#d1d5db" stroke="#9ca3af"/>
+<text x="754" y="351" font-size="10" fill="#111" text-anchor="middle" font-weight="bold" >14</text>
+<text x="769" y="351" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GND</text>
+<rect x="690" y="359" width="20" height="20" rx="4" fill="#ea580c" stroke="#9ca3af"/>
+<text x="700" y="373" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >15</text>
+<text x="685" y="373" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GPIO22</text>
+<line x1="640" y1="369" x2="340" y2="369" stroke="#ea580c" stroke-width="3"/>
+<rect x="476.0" y="364" width="28" height="10" fill="#fff" stroke="#ea580c" stroke-width="1.5"/>
+<text x="490.0" y="361" font-size="8" fill="#ea580c" text-anchor="middle" font-weight="normal" >330Ω–1kΩ</text>
+<text x="332" y="373" font-size="12" fill="#ea580c" text-anchor="end" font-weight="bold" >GPIO22  ←  ESP32 GPIO19  actuator (+ LED)</text>
+<rect x="744" y="359" width="20" height="20" rx="4" fill="#ea580c" stroke="#9ca3af"/>
+<text x="754" y="373" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >16</text>
+<text x="769" y="373" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GPIO23</text>
+<line x1="814" y1="369" x2="1030" y2="369" stroke="#ea580c" stroke-width="3"/>
+<rect x="908.0" y="364" width="28" height="10" fill="#fff" stroke="#ea580c" stroke-width="1.5"/>
+<text x="922.0" y="361" font-size="8" fill="#ea580c" text-anchor="middle" font-weight="normal" >330Ω–1kΩ</text>
+<text x="1038" y="373" font-size="12" fill="#ea580c" text-anchor="start" font-weight="bold" >GPIO23  ←  ESP32 GPIO21  safety readback  (+ LED)</text>
+<rect x="690" y="381" width="20" height="20" rx="4" fill="#fecaca" stroke="#9ca3af"/>
+<text x="700" y="395" font-size="10" fill="#111" text-anchor="middle" font-weight="bold" >17</text>
+<text x="685" y="395" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >3V3</text>
+<rect x="744" y="381" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="754" y="395" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >18</text>
+<text x="769" y="395" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GPIO24</text>
+<rect x="690" y="403" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="700" y="417" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >19</text>
+<text x="685" y="417" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GPIO10</text>
+<rect x="744" y="403" width="20" height="20" rx="4" fill="#d1d5db" stroke="#9ca3af"/>
+<text x="754" y="417" font-size="10" fill="#111" text-anchor="middle" font-weight="bold" >20</text>
+<text x="769" y="417" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GND</text>
+<rect x="690" y="425" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="700" y="439" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >21</text>
+<text x="685" y="439" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GPIO9</text>
+<rect x="744" y="425" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="754" y="439" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >22</text>
+<text x="769" y="439" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GPIO25</text>
+<rect x="690" y="447" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="700" y="461" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >23</text>
+<text x="685" y="461" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GPIO11</text>
+<rect x="744" y="447" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="754" y="461" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >24</text>
+<text x="769" y="461" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GPIO8</text>
+<rect x="690" y="469" width="20" height="20" rx="4" fill="#d1d5db" stroke="#9ca3af"/>
+<text x="700" y="483" font-size="10" fill="#111" text-anchor="middle" font-weight="bold" >25</text>
+<text x="685" y="483" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GND</text>
+<rect x="744" y="469" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="754" y="483" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >26</text>
+<text x="769" y="483" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GPIO7</text>
+<rect x="690" y="491" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="700" y="505" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >27</text>
+<text x="685" y="505" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >ID_SD</text>
+<rect x="744" y="491" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="754" y="505" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >28</text>
+<text x="769" y="505" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >ID_SC</text>
+<rect x="690" y="513" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="700" y="527" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >29</text>
+<text x="685" y="527" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GPIO5</text>
+<rect x="744" y="513" width="20" height="20" rx="4" fill="#d1d5db" stroke="#9ca3af"/>
+<text x="754" y="527" font-size="10" fill="#111" text-anchor="middle" font-weight="bold" >30</text>
+<text x="769" y="527" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GND</text>
+<rect x="690" y="535" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="700" y="549" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >31</text>
+<text x="685" y="549" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GPIO6</text>
+<rect x="744" y="535" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="754" y="549" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >32</text>
+<text x="769" y="549" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GPIO12</text>
+<rect x="690" y="557" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="700" y="571" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >33</text>
+<text x="685" y="571" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GPIO13</text>
+<rect x="744" y="557" width="20" height="20" rx="4" fill="#d1d5db" stroke="#9ca3af"/>
+<text x="754" y="571" font-size="10" fill="#111" text-anchor="middle" font-weight="bold" >34</text>
+<text x="769" y="571" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GND</text>
+<rect x="690" y="579" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="700" y="593" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >35</text>
+<text x="685" y="593" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GPIO19</text>
+<rect x="744" y="579" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="754" y="593" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >36</text>
+<text x="769" y="593" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GPIO16</text>
+<rect x="690" y="601" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="700" y="615" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >37</text>
+<text x="685" y="615" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GPIO26</text>
+<rect x="744" y="601" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="754" y="615" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >38</text>
+<text x="769" y="615" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GPIO20</text>
+<rect x="690" y="623" width="20" height="20" rx="4" fill="#d1d5db" stroke="#9ca3af"/>
+<text x="700" y="637" font-size="10" fill="#111" text-anchor="middle" font-weight="bold" >39</text>
+<text x="685" y="637" font-size="10" fill="#e5e7eb" text-anchor="end" font-weight="normal" >GND</text>
+<rect x="744" y="623" width="20" height="20" rx="4" fill="#374151" stroke="#9ca3af"/>
+<text x="754" y="637" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold" >40</text>
+<text x="769" y="637" font-size="10" fill="#e5e7eb" text-anchor="start" font-weight="normal" >GPIO21</text>
+<rect x="30" y="700" width="520" height="250" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+<text x="42" y="724" font-size="15" fill="#111827" text-anchor="start" font-weight="bold" >ESP32 DevKit pins</text>
+<text x="46" y="744" font-size="12" fill="#111827" text-anchor="start" font-weight="normal" font-family="ui-monospace, Menlo, Consolas, monospace">GND        → breadboard GND rail (shared with Pi pin 6)</text>
+<text x="46" y="766" font-size="12" fill="#2563eb" text-anchor="start" font-weight="normal" font-family="ui-monospace, Menlo, Consolas, monospace">GPIO4      ← Pi GPIO17 (pin 11)   trigger input</text>
+<text x="46" y="788" font-size="12" fill="#2563eb" text-anchor="start" font-weight="normal" font-family="ui-monospace, Menlo, Consolas, monospace">GPIO5      ← Pi GPIO18 (pin 12)   PWM input</text>
+<text x="46" y="810" font-size="12" fill="#2563eb" text-anchor="start" font-weight="normal" font-family="ui-monospace, Menlo, Consolas, monospace">GPIO18     ← Pi GPIO27 (pin 13)   fault input</text>
+<text x="46" y="832" font-size="12" fill="#ea580c" text-anchor="start" font-weight="normal" font-family="ui-monospace, Menlo, Consolas, monospace">GPIO19     → Pi GPIO22 (pin 15)   actuator output  + LED to GND</text>
+<text x="46" y="854" font-size="12" fill="#ea580c" text-anchor="start" font-weight="normal" font-family="ui-monospace, Menlo, Consolas, monospace">GPIO21     → Pi GPIO23 (pin 16)   safety-relay output  + LED to GND</text>
+<text x="46" y="876" font-size="12" fill="#7c3aed" text-anchor="start" font-weight="normal" font-family="ui-monospace, Menlo, Consolas, monospace">GPIO17 TX2 → Pi GPIO15 (pin 10)   JSON telemetry</text>
+<text x="46" y="898" font-size="12" fill="#7c3aed" text-anchor="start" font-weight="normal" font-family="ui-monospace, Menlo, Consolas, monospace">GPIO16 RX2 ← Pi GPIO14 (pin 8)    spare, can skip</text>
+<text x="46" y="920" font-size="12" fill="#111827" text-anchor="start" font-weight="normal" font-family="ui-monospace, Menlo, Consolas, monospace">5V / USB   ← own USB charger or power bank</text>
+<rect x="600" y="700" width="420" height="250" rx="10" fill="#fefce8" stroke="#ca8a04" stroke-width="2"/>
+<text x="612" y="724" font-size="15" fill="#111827" text-anchor="start" font-weight="bold" >Indicator LEDs (so judges can see the bug)</text>
+<text x="616" y="744" font-size="12" fill="#713f12" text-anchor="start" font-weight="normal" >On each ESP32 output, add an LED in parallel with the wire to the Pi:</text>
+<text x="616" y="768" font-size="12" fill="#ea580c" text-anchor="start" font-weight="bold" >ESP32 GPIO19 (actuator)</text>
+<line x1="616" y1="790" x2="700" y2="790" stroke="#ea580c" stroke-width="3"/>
+<line x1="700" y1="790" x2="760" y2="790" stroke="#ea580c" stroke-width="3"/>
+<rect x="716" y="785" width="28" height="10" fill="#fff" stroke="#ca8a04" stroke-width="1.5"/>
+<text x="730" y="782" font-size="8" fill="#ca8a04" text-anchor="middle" font-weight="normal" >330Ω</text>
+<polygon points="778,782 792,790 778,798" fill="#facc15" stroke="#111"/>
+<line x1="792" y1="782" x2="792" y2="798" stroke="#111" stroke-width="2"/>
+<line x1="792" y1="790" x2="840" y2="790" stroke="#111" stroke-width="3"/>
+<text x="846" y="794" font-size="11" fill="#111" text-anchor="start" font-weight="bold" >GND</text>
+<line x1="700" y1="790" x2="700" y2="812" stroke="#ea580c" stroke-width="3"/>
+<text x="708" y="816" font-size="11" fill="#ea580c" text-anchor="start" font-weight="normal" >→ to Pi (through its own 330Ω–1kΩ)</text>
+<text x="616" y="838" font-size="12" fill="#ea580c" text-anchor="start" font-weight="bold" >ESP32 GPIO21 (safety relay)</text>
+<line x1="616" y1="860" x2="700" y2="860" stroke="#ea580c" stroke-width="3"/>
+<line x1="700" y1="860" x2="760" y2="860" stroke="#ea580c" stroke-width="3"/>
+<rect x="716" y="855" width="28" height="10" fill="#fff" stroke="#ca8a04" stroke-width="1.5"/>
+<text x="730" y="852" font-size="8" fill="#ca8a04" text-anchor="middle" font-weight="normal" >330Ω</text>
+<polygon points="778,852 792,860 778,868" fill="#facc15" stroke="#111"/>
+<line x1="792" y1="852" x2="792" y2="868" stroke="#111" stroke-width="2"/>
+<line x1="792" y1="860" x2="840" y2="860" stroke="#111" stroke-width="3"/>
+<text x="846" y="864" font-size="11" fill="#111" text-anchor="start" font-weight="bold" >GND</text>
+<line x1="700" y1="860" x2="700" y2="882" stroke="#ea580c" stroke-width="3"/>
+<text x="708" y="886" font-size="11" fill="#ea580c" text-anchor="start" font-weight="normal" >→ to Pi (through its own 330Ω–1kΩ)</text>
+<text x="616" y="900" font-size="12" fill="#713f12" text-anchor="start" font-weight="bold" >FIRMWARE LIED moment: telemetry says safety=0,</text>
+<text x="616" y="918" font-size="12" fill="#713f12" text-anchor="start" font-weight="bold" >but the GPIO21 LED stays lit and Pi GPIO23 reads HIGH.</text>
+<text x="616" y="936" font-size="12" fill="#713f12" text-anchor="start" font-weight="normal" >LED long leg (+) toward the ESP32, short leg to GND.</text>
+<rect x="1070" y="700" width="400" height="250" rx="10" fill="#f0f9ff" stroke="#0284c7" stroke-width="2"/>
+<text x="1082" y="724" font-size="15" fill="#111827" text-anchor="start" font-weight="bold" >Parts list</text>
+<text x="1086" y="744" font-size="12" fill="#0c4a6e" text-anchor="start" font-weight="normal" >1× Raspberry Pi (3/4/Zero 2 W) + SD card + PSU</text>
+<text x="1086" y="764" font-size="12" fill="#0c4a6e" text-anchor="start" font-weight="normal" >1× ESP32 DevKit (esp32dev) + USB cable (flash only)</text>
+<text x="1086" y="784" font-size="12" fill="#0c4a6e" text-anchor="start" font-weight="normal" >1× USB charger / power bank for the ESP32</text>
+<text x="1086" y="804" font-size="12" fill="#0c4a6e" text-anchor="start" font-weight="normal" >1× breadboard</text>
+<text x="1086" y="824" font-size="12" fill="#0c4a6e" text-anchor="start" font-weight="normal" >~10× female–male jumpers (Pi → breadboard)</text>
+<text x="1086" y="844" font-size="12" fill="#0c4a6e" text-anchor="start" font-weight="normal" >~10× male–male jumpers (breadboard → ESP32)</text>
+<text x="1086" y="864" font-size="12" fill="#0c4a6e" text-anchor="start" font-weight="normal" >7× 330 Ω–1 kΩ resistors (signal series)</text>
+<text x="1086" y="884" font-size="12" fill="#0c4a6e" text-anchor="start" font-weight="normal" >2× LEDs + 2× 330 Ω resistors (indicators)</text>
+<text x="1086" y="904" font-size="12" fill="#0c4a6e" text-anchor="start" font-weight="normal" >1× laptop running aperture-ui (Linux for Bluetooth,</text>
+<text x="1086" y="924" font-size="12" fill="#0c4a6e" text-anchor="start" font-weight="normal" >    any OS over Wi-Fi/TCP)</text>
+<text x="30" y="985" font-size="13" fill="#111827" text-anchor="start" font-weight="bold" >Legend:</text>
+<line x1="100" y1="980" x2="128" y2="980" stroke="#2563eb" stroke-width="4"/>
+<text x="134" y="985" font-size="12" fill="#374151" text-anchor="start" font-weight="normal" >Pi → ESP32 (stimulus)</text>
+<line x1="360" y1="980" x2="388" y2="980" stroke="#ea580c" stroke-width="4"/>
+<text x="394" y="985" font-size="12" fill="#374151" text-anchor="start" font-weight="normal" >ESP32 → Pi (physical readback)</text>
+<line x1="620" y1="980" x2="648" y2="980" stroke="#7c3aed" stroke-width="4"/>
+<text x="654" y="985" font-size="12" fill="#374151" text-anchor="start" font-weight="normal" >UART telemetry (what firmware claims)</text>
+<line x1="880" y1="980" x2="908" y2="980" stroke="#111827" stroke-width="4"/>
+<text x="914" y="985" font-size="12" fill="#374151" text-anchor="start" font-weight="normal" >GND / power</text>
+<text x="1100" y="985" font-size="11" fill="#6b7280" text-anchor="start" font-weight="normal" >Pi setup: enable UART, disable serial console on /dev/serial0 (raspi-config).</text>
+</svg>

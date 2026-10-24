@@ -16,6 +16,8 @@ class Client:
         self.file = self.socket.makefile("rwb")
 
     def command(self, **command):
+        # esptool writes can take minutes; every other command answers within the 10 s budget.
+        self.socket.settimeout(300 if command.get("cmd") == "flash_run" else 10)
         self.file.write(json.dumps(command).encode() + b"\n")
         self.file.flush()
         line = self.file.readline(MAX_LINE + 1)
