@@ -50,7 +50,8 @@ class LoggedClient:
 
 
 class ConsoleApp:
-    def __init__(self, mode="sim", host="127.0.0.1", port=8765, profile=None):
+    def __init__(self, mode="sim", host="127.0.0.1", port=8765, profile=None, allowed_hosts=()):
+        self.allowed_hosts = {"localhost", "127.0.0.1", *allowed_hosts}
         self.lock = threading.Lock()
         self.condition = threading.Condition()
         self.events = deque(maxlen=1000)
@@ -326,10 +327,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         app = self.server.app
         # Local console: reject cross-origin browser writes, including DNS rebinding.
-        if self.headers.get("Origin") not in (None, f"http://{self.headers.get('Host')}"):
+        host = self.headers.get("Host", "")
+        if self.headers.get("Origin") not in (None, f"http://{host}", f"https://{host}"):
             self.send(403, {"error": "cross-origin request rejected"})
             return
-        if self.headers.get("Host", "").split(":")[0] not in ("localhost", "127.0.0.1"):
+        if host.split(":")[0] not in app.allowed_hosts:
             self.send(403, {"error": "local host required"})
             return
         if self.path not in ("/api/prompt", "/api/connect", "/api/requests",
@@ -390,8 +392,11 @@ def main():
     parser.add_argument("--host", default="127.0.0.1", help="daemon hostname or Bluetooth MAC")
     parser.add_argument("--daemon-port", type=int, default=8765)
     parser.add_argument("--profile", choices=("esp32_safety", "mpu6050_gyro", "display"))
+    parser.add_argument("--allow-host", action="append", default=[], metavar="HOST",
+                        help="extra Host header accepted for writes, e.g. a reverse-proxy name")
     args = parser.parse_args()
-    app = ConsoleApp(args.backend_mode, args.host, args.daemon_port, args.profile)
+    app = ConsoleApp(args.backend_mode, args.host, args.daemon_port, args.profile,
+                     args.allow_host)
     try:
         with HTTPServer(("127.0.0.1", args.port), app) as server:
             print(f"Aperture OS Console: http://localhost:{args.port}", flush=True)
