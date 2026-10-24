@@ -104,27 +104,38 @@ TOOL_SCHEMAS = [
 ]
 
 
-def run_llm(client, model, display=None, max_turns=30, prompt="Execute the safety test plan now."):
+def run_llm(client, model, display=None, max_turns=30, prompt="Execute the safety test plan now.",
+            toolset=None):
     from openai import OpenAI
 
     llm = OpenAI()
-    tools = Tools(client)
-    messages = [{"role": "system", "content": SYSTEM_PROMPT},
+    tools = toolset or Tools(client)
+    system_prompt = ("You are Aperture OS, a universal GPIO-only HIL safety verifier. "
+                     "No DUT USB connection exists. Request specific BCM-to-DUT wires and wait "
+                     "for human confirmation before testing. Never confirm wiring yourself. "
+                     "Use selected profile expectations and decoded I2C/UART when available; "
+                     "never assume arbitrary DUTs emit Serial. Report measured evidence only."
+                     if toolset else SYSTEM_PROMPT)
+    if toolset:
+        system_prompt += " Current rig and human wiring: " + json.dumps(toolset.context())
+    messages = [{"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}]
     summary = "Turn limit reached; plan incomplete"
     complete = False
     try:
         for _ in range(max_turns):
             message = llm.chat.completions.create(
-                model=model, messages=messages, tools=TOOL_SCHEMAS).choices[0].message
+                model=model, messages=messages,
+                tools=toolset.schemas if toolset else TOOL_SCHEMAS).choices[0].message
             messages.append(message.model_dump(exclude_none=True))
             if not message.tool_calls:
                 summary = message.content or ""
                 complete = True
                 break
             for call in message.tool_calls:
-                functions = {name: getattr(tools, name) for name in (
-                    "stimulate_hardware", "read_hardware_state", "inject_hardware_fault")}
+                functions = toolset.functions if toolset else {
+                    name: getattr(tools, name) for name in (
+                        "stimulate_hardware", "read_hardware_state", "inject_hardware_fault")}
                 try:
                     result = functions[call.function.name](**json.loads(call.function.arguments))
                 except (ValueError, TypeError, KeyError) as exc:
@@ -136,7 +147,10 @@ def run_llm(client, model, display=None, max_turns=30, prompt="Execute the safet
                 messages.append({"role": "tool", "tool_call_id": call.id,
                                  "content": json.dumps(result)})
     finally:
-        tools.stimulate_hardware("vector", {"trig": 0, "pwm": 0, "fault": 0})
+        if toolset:
+            toolset.cleanup()
+        else:
+            tools.stimulate_hardware("vector", {"trig": 0, "pwm": 0, "fault": 0})
     return {"mode": "llm", "complete": complete, "summary": summary,
-            "pass": complete and len(tools.observations) > 1 and
+            "pass": complete and len(tools.observations) > (0 if toolset else 1) and
             not any(r["issues"] for r in tools.observations), "steps": tools.observations}

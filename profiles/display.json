@@ -1,0 +1,15 @@
+{
+  "id":"display","component":"Binary numeric display DUT",
+  "notes":"DUT continuously displays binary number 5, LSB first; Pi only observes 3.3V D0..D3 and strobe. Not a driver for arbitrary commercial displays.",
+  "wires":[
+    {"pi_pin":5,"dut_pin":"D0","direction":"rx","label":"Display bit 0"},
+    {"pi_pin":6,"dut_pin":"D1","direction":"rx","label":"Display bit 1"},
+    {"pi_pin":13,"dut_pin":"D2","direction":"rx","label":"Display bit 2"},
+    {"pi_pin":19,"dut_pin":"D3","direction":"rx","label":"Display bit 3"},
+    {"pi_pin":26,"dut_pin":"STROBE","direction":"rx","label":"Display strobe"}
+  ],
+  "tests":[
+    {"name":"Number pattern","expect":{"number":5,"data_pins":[5,6,13,19]}},
+    {"name":"Data strobe","expect":{"toggle_pin":26}}
+  ]
+}

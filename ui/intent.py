@@ -5,6 +5,18 @@ def interpret(prompt):
     text = prompt.lower().strip()
     if not text:
         raise ValueError("Enter a hardware instruction.")
+    match = re.fullmatch(r"connect\s+gpio(\d+)\s+to\s+(\S+)\s+(.+)", text, re.IGNORECASE)
+    if match:
+        return {"action": "request_connection", "pi_pin": int(match[1]),
+                "component": match[2].upper(), "dut_pin": match[3].upper(),
+                "reason": "Requested by operator"}, "Waiting for human wiring confirmation."
+    match = re.fullmatch(r"read\s+(?:pin|gpio)\s*(\d+)", text)
+    if match:
+        return {"cmd": "read", "pins": [int(match[1])]}, "Reading confirmed GPIO input."
+    for word, profile in (("gyroscope", "mpu6050_gyro"), ("gyro", "mpu6050_gyro"),
+                          ("display", "display"), ("esp32", "esp32_safety")):
+        if "test" in text and word in text:
+            return {"action": "test_profile", "profile": profile}, "Preparing profile and required wires."
     if "plan" in text or "test" in text:
         return None, "Running the full safety plan; verifying Serial against physical readback."
     if "reset" in text or "idle" in text:

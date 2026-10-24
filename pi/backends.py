@@ -2,12 +2,23 @@
 import json
 import time
 
+from pi.gpio import GenericGPIO
 
-class SimBackend:
-    def __init__(self, demo_bug=True):
+
+class SimBackend(GenericGPIO):
+    is_real = False
+
+    def __init__(self, demo_bug=True, profile="esp32_safety"):
+        self.init_gpio(profile)
         self.demo_bug = demo_bug
         self.inputs = {"trig": 0, "pwm": 0.0, "fault": 0}
         self.safety = 1
+
+    def select_profile(self, profile):
+        super().select_profile(profile)
+        self.inputs = {"trig": 0, "pwm": 0.0, "fault": 0}
+        self.safety = 1
+        self.tick = 0
 
     def apply(self, **values):
         self.inputs.update(values)
@@ -29,46 +40,64 @@ class SimBackend:
         }
 
     def close(self):
-        pass
+        self.close_gpio()
 
 
-class RealBackend:
-    def __init__(self, serial_port="/dev/ttyUSB0"):
-        import serial
-        from gpiozero import DigitalInputDevice, OutputDevice, PWMOutputDevice
+class RealBackend(GenericGPIO):
+    is_real = True
 
-        self.outputs = {"trig": OutputDevice(17), "pwm": PWMOutputDevice(18, frequency=100),
-                        "fault": OutputDevice(27)}
-        self.inputs = {"22": DigitalInputDevice(22, pull_up=False),
-                       "23": DigitalInputDevice(23, pull_up=False)}
-        self.serial = serial.Serial(serial_port, 115200, timeout=0.25)
+    def __init__(self, serial_port="/dev/serial0", profile="esp32_safety"):
+        self.init_gpio(profile)
+        self.serial_port = serial_port
+
+    def legacy_setup(self):
+        for pin, direction in ((17, "tx"), (18, "tx"), (27, "tx"), (22, "rx"), (23, "rx")):
+            if pin not in self.gpio_config:
+                self.configure(pin, direction, "down" if direction == "rx" else "none")
+        self.outputs = {"trig": self.devices[17], "pwm": self.devices[18], "fault": self.devices[27]}
+        self.inputs = {"22": self.devices[22], "23": self.devices[23]}
 
     def apply(self, **values):
+        self.legacy_setup()
         for key, value in values.items():
+            if key == "pwm":
+                self.pwm_gpio(18, value, 100)
+                self.outputs[key] = self.devices[18]
+                continue
             self.outputs[key].value = value
 
     def read(self):
+        if hasattr(self, "gpio_config"):
+            self.legacy_setup()
+            telemetry = self.read_uart()
+            return {"telemetry": telemetry,
+                    "injected": {k: d.value for k, d in self.outputs.items()},
+                    "physical": {k: int(d.value) for k, d in self.inputs.items()}}
+        return self._read_packet()
+
+    def read_uart(self):
+        if self.uart is None:
+            import serial
+
+            self.uart = serial.Serial(self.serial_port, 115200, timeout=0.25)
+        return self._read_packet(self.uart)["telemetry"]
+
+    def _read_packet(self, uart=None):
+        uart = uart if uart is not None else self.serial
         # Discard queued packets; only a newly emitted packet may verify this stimulus.
-        self.serial.reset_input_buffer()
+        uart.reset_input_buffer()
         deadline = time.monotonic() + 0.6
         while time.monotonic() < deadline:
             try:
-                telemetry = json.loads(self.serial.readline())
+                telemetry = json.loads(uart.readline())
                 if not isinstance(telemetry, dict) or not {
                     "state", "actuator", "safety", "trig", "pwm", "fault"
                 } <= telemetry.keys():
                     continue
-                return {"telemetry": telemetry,
-                        "injected": {k: d.value for k, d in self.outputs.items()},
-                        "physical": {k: int(d.value) for k, d in self.inputs.items()}}
+                return {"telemetry": telemetry}
             except (ValueError, UnicodeError):
                 continue
         raise TimeoutError("no valid fresh DUT telemetry within 600ms")
 
     def close(self):
-        # Deassert trigger/PWM before clearing fault, avoiding accidental actuation.
-        for key in ("trig", "pwm", "fault"):
-            self.outputs[key].off()
-        for device in (*self.outputs.values(), *self.inputs.values()):
-            device.close()
-        self.serial.close()
+        self.close_gpio()

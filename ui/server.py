@@ -8,11 +8,16 @@ from collections import deque
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from agent.client import Client
+from agent.generic_tools import GenericTools
 from agent.planner import run_llm, run_offline, verify
+from agent.profiles import checked, run_profile
+from agent.wiring import Wiring
 from pi.backends import SimBackend
 from pi.daemon import Harness, Server
+from profiles import list_profiles, load_profile
 from ui.intent import interpret
 
 
@@ -31,11 +36,18 @@ class LoggedClient:
         self.app.emit("RX", result, (time.perf_counter()-start)*1000)
         if "physical" in result:
             self.app.measurement = result
+        if "pins" in result and command["cmd"] != "list_pins":
+            if "samples" in result:
+                for sample in result["samples"]:
+                    self.app.wiring.header.update(sample["pins"])
+                self.app.wiring.emit_header()
+            else:
+                self.app.wiring.update(result["pins"])
         return result
 
 
 class ConsoleApp:
-    def __init__(self, mode="sim", host="127.0.0.1", port=8765):
+    def __init__(self, mode="sim", host="127.0.0.1", port=8765, profile=None):
         self.lock = threading.Lock()
         self.condition = threading.Condition()
         self.events = deque(maxlen=1000)
@@ -46,7 +58,10 @@ class ConsoleApp:
         self.report = None
         self.connected = False
         self.config = {}
+        self.wiring = Wiring(self.emit)
         self.connect(mode, host, port, True)
+        if profile:
+            self.select_profile(profile)
 
     def emit(self, level, data, latency_ms=None):
         with self.condition:
@@ -77,12 +92,18 @@ class ConsoleApp:
             self.thread.start()
         self.measurement = None
         self.report = None
+        selected = self.wiring.profile["id"] if self.wiring.profile else None
+        self.wiring = Wiring(self.emit)
         with self.client() as raw:
             client = LoggedClient(raw, self)
             client.command(cmd="ping")
-            client.command(cmd="read_state")
+            client.command(cmd="list_pins")
+            if mode == "sim" and selected is None:
+                client.command(cmd="read_state")
         self.connected = True
         self.emit("AGENT", {"reply": "Harness connected. Ready for verification."})
+        if selected:
+            self.select_profile(selected)
 
     def client(self):
         if self.config["mode"] == "sim":
@@ -92,12 +113,65 @@ class ConsoleApp:
     def snapshot(self):
         return {"connection": {**self.config, "connected": self.connected},
                 "measurement": self.measurement, "report": self.report,
-                "llm": bool(os.environ.get("OPENAI_API_KEY"))}
+                "llm": bool(os.environ.get("OPENAI_API_KEY")),
+                "profile": self.wiring.status() if self.wiring.profile else None}
+
+    def select_profile(self, name):
+        load_profile(name)
+        with self.client() as raw:
+            checked(LoggedClient(raw, self), cmd="select_profile", profile=name)
+        self.report = None
+        result = self.wiring.select(name)
+        self.emit("PROFILE", result)
+        return result
+
+    def run_selected(self):
+        with self.client() as raw:
+            self.report = run_profile(LoggedClient(raw, self), self.wiring,
+                                      lambda row: self.emit("STEP", row))
+        self.emit("REPORT", self.report)
+        return self.report
+
+    def connection_request(self, data):
+        pin = data.get("pi_pin")
+        self.wiring.header.gpio(pin)
+        for key in ("dut_pin", "component", "reason"):
+            if not isinstance(data.get(key), str) or not data[key].strip() or len(data[key]) > 500:
+                raise ValueError("dut_pin, component and reason must be nonempty text up to 500 chars")
+        with self.client() as raw:
+            checked(LoggedClient(raw, self), cmd="release", pin=pin)
+        return self.wiring.request_connection(data.get("pi_pin"), data.get("dut_pin"),
+                                              data.get("component"), data.get("reason"))
+
+    def confirm(self, pin, confirmed):
+        state = self.wiring.header.gpio(pin)
+        if state["request"] is None:
+            raise ValueError("no pending connection request")
+        if not confirmed:
+            with self.client() as raw:
+                checked(LoggedClient(raw, self), cmd="release", pin=pin)
+        return self.wiring.confirm_connection(pin, confirmed)
 
     def prompt(self, prompt):
         if not isinstance(prompt, str) or len(prompt) > 4000:
             raise ValueError("prompt must be text up to 4000 characters")
         self.emit("USER", {"reply": prompt})
+
+        # New profile-aware intents are wiring-gated; legacy ESP32 demo remains compatible.
+        if not os.environ.get("OPENAI_API_KEY"):
+            command, reply = interpret(prompt)
+            if command and command.get("action") == "request_connection":
+                request = self.connection_request(command)
+                self.emit("AGENT", {"reply": reply})
+                return {"reply": reply, "request": request, "report": None}
+            if command and command.get("action") == "test_profile":
+                if not self.wiring.profile or self.wiring.profile["id"] != command["profile"]:
+                    self.select_profile(command["profile"])
+                self.emit("AGENT", {"reply": reply})
+                return {"reply": reply, "report": self.run_selected()}
+            if self.wiring.profile and command is None:
+                return {"reply": "Running selected profile (or waiting for wiring).",
+                        "report": self.run_selected()}
 
         def display(row):
             self.emit("STEP", row)
@@ -106,15 +180,21 @@ class ConsoleApp:
             client = LoggedClient(raw, self)
             if os.environ.get("OPENAI_API_KEY"):
                 self.report = run_llm(client, os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
-                                      display, prompt=prompt)
+                                      display, prompt=prompt,
+                                      toolset=GenericTools(client, self.wiring, display))
                 reply = self.report["summary"]
             else:
                 command, reply = interpret(prompt)
                 if command is None:
                     self.report = run_offline(client, display)
                 else:
-                    response = client.command(**command)
-                    row = {**response, "issues": verify(response), "step": prompt,
+                    if command["cmd"] == "read":
+                        response = GenericTools(client, self.wiring).read_pins(command["pins"])
+                    elif self.wiring.profile:
+                        raise ValueError("Use generic profile read/write tools after selecting a profile")
+                    else:
+                        response = client.command(**command)
+                    row = {**response, "issues": response.get("issues", verify(response)), "step": prompt,
                            "reasoning": reply}
                     display(row)
                     self.report = {"mode": "offline", "pass": not row["issues"], "steps": [row]}
@@ -174,6 +254,20 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, app.snapshot())
         elif self.path == "/api/report":
             self.send(200, app.report)
+        elif self.path == "/api/header":
+            self.send(200, {"pins": app.wiring.header.snapshot()})
+        elif self.path == "/api/requests":
+            self.send(200, {"requests": app.wiring.requests()})
+        elif self.path == "/api/profiles":
+            self.send(200, {"profiles": list_profiles(),
+                            "selected": app.wiring.status() if app.wiring.profile else None})
+        elif urlsplit(self.path).path == "/api/waveform":
+            try:
+                pin = int(parse_qs(urlsplit(self.path).query).get("pin", [""])[0])
+                app.wiring.header.gpio(pin)
+                self.send(200, {"pi_pin": pin, "samples": list(app.wiring.header.history[pin])})
+            except ValueError as exc:
+                self.send(400, {"error": str(exc)})
         elif self.path in ("/", "/app.js", "/style.css"):
             name = "index.html" if self.path == "/" else self.path[1:]
             kind = {"index.html": "text/html", "app.js": "text/javascript", "style.css": "text/css"}
@@ -190,7 +284,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Host", "").split(":")[0] not in ("localhost", "127.0.0.1"):
             self.send(403, {"error": "local host required"})
             return
-        if self.path not in ("/api/prompt", "/api/connect"):
+        if self.path not in ("/api/prompt", "/api/connect", "/api/requests",
+                             "/api/requests/confirm", "/api/requests/reject",
+                             "/api/profiles/select", "/api/profiles/run", "/api/gpio"):
             self.send(404, {"error": "not found"})
             return
         if not app.lock.acquire(blocking=False):
@@ -207,6 +303,23 @@ class Handler(BaseHTTPRequestHandler):
                 app.connect(data.get("mode", "sim"), data.get("host", "127.0.0.1"),
                             data.get("port", 8765), data.get("demo_bug", True))
                 result = app.snapshot()
+            elif self.path == "/api/requests":
+                result = app.connection_request(data)
+            elif self.path in ("/api/requests/confirm", "/api/requests/reject"):
+                result = app.confirm(data.get("pi_pin"), self.path.endswith("confirm"))
+            elif self.path == "/api/profiles/select":
+                result = app.select_profile(data.get("profile"))
+            elif self.path == "/api/profiles/run":
+                result = app.run_selected()
+            elif self.path == "/api/gpio":
+                with app.client() as raw:
+                    tools = GenericTools(LoggedClient(raw, app), app.wiring)
+                    functions = {"read": tools.read_pins, "write": tools.write_pin,
+                                 "sample": tools.sample_pins, "configure_pin": tools.configure_pin}
+                    name = data.get("cmd")
+                    if not isinstance(name, str) or name not in functions:
+                        raise ValueError("cmd must be read/write/sample/configure_pin")
+                    result = functions[name](**{k: v for k, v in data.items() if k != "cmd"})
             else:
                 result = app.prompt(data.get("prompt", ""))
             self.send(200, result)
@@ -225,8 +338,9 @@ def main():
     parser.add_argument("--backend-mode", choices=("sim", "tcp", "rfcomm"), default="sim")
     parser.add_argument("--host", default="127.0.0.1", help="daemon hostname or Bluetooth MAC")
     parser.add_argument("--daemon-port", type=int, default=8765)
+    parser.add_argument("--profile", choices=("esp32_safety", "mpu6050_gyro", "display"))
     args = parser.parse_args()
-    app = ConsoleApp(args.backend_mode, args.host, args.daemon_port)
+    app = ConsoleApp(args.backend_mode, args.host, args.daemon_port, args.profile)
     try:
         with HTTPServer(("127.0.0.1", args.port), app) as server:
             print(f"Aperture OS Console: http://localhost:{args.port}", flush=True)

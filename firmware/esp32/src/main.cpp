@@ -7,7 +7,7 @@
 constexpr int TRIGGER = 4, PWM = 5, FAULT = 18, ACTUATOR = 19, SAFETY = 21;
 
 void setup() {
-  Serial.begin(115200);
+  Serial2.begin(115200, SERIAL_8N1, 16, 17);
   pinMode(TRIGGER, INPUT_PULLDOWN);
   pinMode(PWM, INPUT_PULLDOWN);
   pinMode(FAULT, INPUT_PULLDOWN);
@@ -38,7 +38,7 @@ void loop() {
   if (!(DEMO_BUG && fault && (trig || duty > 0.8f))) {
     digitalWrite(SAFETY, safety);
   }
-  Serial.printf("{\"state\":\"%s\",\"trig\":%d,\"fault\":%d,\"pwm\":%.3f,"
+  Serial2.printf("{\"state\":\"%s\",\"trig\":%d,\"fault\":%d,\"pwm\":%.3f,"
                 "\"pwm_us\":%lu,\"actuator\":%d,\"safety\":%d}\n",
                 state, trig, fault, duty, highUs, actuator, safety);
   delay(50);

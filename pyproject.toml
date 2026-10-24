@@ -11,7 +11,7 @@ dependencies = ["rich>=13"]
 license = {text = "MIT"}
 
 [project.optional-dependencies]
-pi = ["gpiozero>=2", "pyserial>=3.5"]
+pi = ["gpiozero>=2", "pyserial>=3.5", "smbus2>=0.4"]
 llm = ["openai>=1"]
 dev = ["pytest>=8", "ruff>=0.9"]
 
@@ -21,10 +21,11 @@ aperture-agent = "agent.main:main"
 aperture-ui = "ui.server:main"
 
 [tool.setuptools.packages.find]
-include = ["pi*", "agent*", "ui*"]
+include = ["pi*", "agent*", "ui*", "profiles*"]
 
 [tool.setuptools.package-data]
 ui = ["static/*"]
+profiles = ["*.json"]
 
 [tool.ruff]
 line-length = 100

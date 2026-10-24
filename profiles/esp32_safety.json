@@ -1,0 +1,21 @@
+{
+  "id": "esp32_safety", "component": "ESP32 safety controller",
+  "notes": "3.3V logic, shared ground required. Telemetry via Pi header UART, never USB.",
+  "wires": [
+    {"pi_pin":17,"dut_pin":"GPIO4","direction":"tx","label":"Trigger"},
+    {"pi_pin":18,"dut_pin":"GPIO5","direction":"tx","label":"100 Hz PWM"},
+    {"pi_pin":27,"dut_pin":"GPIO18","direction":"tx","label":"Fault"},
+    {"pi_pin":22,"dut_pin":"GPIO19","direction":"rx","label":"Actuator"},
+    {"pi_pin":23,"dut_pin":"GPIO21","direction":"rx","label":"Safety relay"},
+    {"pi_pin":15,"dut_pin":"GPIO17 TX2","direction":"rx","label":"UART telemetry RX"},
+    {"pi_pin":14,"dut_pin":"GPIO16 RX2","direction":"tx","label":"UART TX"}
+  ],
+  "tests": [
+    {"name":"Nominal Operation","vector":{"trig":1,"pwm":0.3,"fault":0},"expect":{"state":"ACTIVE_DRIVE","actuator":1,"safety":1}},
+    {"name":"High Load PWM","vector":{"trig":1,"pwm":0.9,"fault":0},"expect":{"state":"THROTTLING","actuator":0,"safety":1}},
+    {"name":"Edge-Case Glitch","vector":{"trig":0,"pwm":0.9,"fault":1},"expect":{"state":"FAULT_SHUTDOWN","actuator":0,"safety":0}},
+    {"name":"Fault Recovery","vector":{"trig":0,"pwm":0,"fault":0},"expect":{"state":"IDLE","actuator":0,"safety":1}},
+    {"name":"Fault while trigger HIGH","vector":{"trig":1,"pwm":0.3,"fault":1},"expect":{"state":"FAULT_SHUTDOWN","actuator":0,"safety":0}},
+    {"name":"Final Recovery","vector":{"trig":0,"pwm":0,"fault":0},"expect":{"state":"IDLE","actuator":0,"safety":1}}
+  ]
+}
