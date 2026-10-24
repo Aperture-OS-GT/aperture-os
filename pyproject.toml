@@ -19,6 +19,7 @@ dev = ["pytest>=8", "ruff>=0.9"]
 aperture-daemon = "pi.daemon:main"
 aperture-agent = "agent.main:main"
 aperture-ui = "ui.server:main"
+aperture-bridge = "pi.bridge.daemon:main"
 
 [tool.setuptools.packages.find]
 include = ["aperture*", "pi*", "agent*", "ui*", "profiles*"]

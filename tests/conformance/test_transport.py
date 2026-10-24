@@ -2,18 +2,40 @@
 
 Add new fixtures (TCP -> bridge sim, BLE -> bench) to ``params`` as they land.
 """
+import threading
+
 import pytest
 
 from aperture.protocol import OPS
-from aperture.transport import VirtualTransport
+from aperture.rig.virtual import VirtualRig, load_scenario
+from aperture.transport import TcpTransport, VirtualTransport
+from pi.bridge.server import PUMP_INTERVAL_S, BridgeServer
+from pi.bridge.tcp import TcpBridge
 
 
-@pytest.fixture(params=["virtual"])
+@pytest.fixture
+def bridge_sim():
+    """The real bridge daemon stack (TCP server + BridgeServer) serving a realtime Virtual Rig."""
+    bridge = BridgeServer(VirtualRig(load_scenario("loopback"), realtime=True),
+                          pump_interval_s=PUMP_INTERVAL_S)
+    server = TcpBridge(("127.0.0.1", 0), bridge)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield server
+    server.shutdown()
+    server.close_connections()
+    bridge.shutdown()
+    server.server_close()
+    thread.join()
+
+
+@pytest.fixture(params=["virtual", "bridge-sim"])
 def transport(request):
     if request.param == "virtual":
         t = VirtualTransport(scenario="loopback")
-    else:  # pragma: no cover
-        pytest.skip(request.param)
+    else:
+        server = request.getfixturevalue("bridge_sim")
+        t = TcpTransport("127.0.0.1", server.server_address[1])
     t.connect()
     yield t
     t.disconnect()
