@@ -51,6 +51,15 @@ def images(env, project=PROJECT):
     return sorted(result, key=lambda image: image["offset"])
 
 
+def simulated_images(env):
+    """Placeholder images for the simulated harness when no PlatformIO build exists."""
+    if env not in ENVS:
+        raise ValueError(f"env must be one of {ENVS}")
+    tag = f"APERTURE_BUILD esp32_safety DEMO_BUG={0 if env == 'fixed' else 1}".encode()
+    return [{"offset": 0x1000, "name": "bootloader.bin", "data": b"\xe9" + b"\xff" * 63},
+            {"offset": 0x10000, "name": "firmware.bin", "data": b"\xe9" + tag + b"\x00" * 31}]
+
+
 def manifest(images):
     return [{"offset": image["offset"], "size": len(image["data"]),
              "sha256": hashlib.sha256(image["data"]).hexdigest()} for image in images]

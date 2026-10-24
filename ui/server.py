@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from agent.client import Client
-from agent.flash import FLASH_PINS, build, flash, required_pins
+from agent.flash import FLASH_PINS, build, flash, required_pins, simulated_images
 from agent.flash import images as load_images
 from agent.generic_tools import GenericTools
 from agent.planner import run_llm, run_offline, verify
@@ -150,7 +150,14 @@ class ConsoleApp:
         if data.get("build"):
             self.emit("FLASH", {"stage": "build", "env": env})
             build(env)
-        images = load_images(env)
+        try:
+            images = load_images(env)
+        except ValueError:
+            if self.config.get("mode") != "sim":
+                raise
+            # No PlatformIO build on this laptop: rehearse against the simulated harness.
+            images = simulated_images(env)
+            self.emit("FLASH", {"stage": "simulated", "env": env})
         self.emit("FLASH", {"stage": "start", "env": env, "manual_boot": manual,
                             "images": [{"name": i.get("name"), "offset": i["offset"],
                                         "size": len(i["data"])} for i in images]})

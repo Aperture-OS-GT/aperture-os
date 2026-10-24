@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from agent.flash import CHUNK_BYTES, flash, images, manifest, required_pins
+from agent.flash import CHUNK_BYTES, flash, images, manifest, required_pins, simulated_images
 from agent.wiring import Wiring
 from pi.backends import RealBackend, SimBackend
 from pi.daemon import Harness
@@ -118,6 +118,23 @@ def test_manifest_and_chunking():
         images("nope")
     with pytest.raises(ValueError, match="missing"):
         images("fixed", project="/nonexistent")
+    assert b"DEMO_BUG=0" in simulated_images("fixed")[1]["data"]
+    assert b"DEMO_BUG=1" in simulated_images("esp32dev")[1]["data"]
+
+
+def test_http_flash_falls_back_to_simulated_images_without_a_build(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    app = server.ConsoleApp(profile="esp32_safety")
+    try:
+        for pin in (17, 18, 27, 22, 23, 14, 15, 25, 24):
+            app.confirm(pin, True)
+        assert app.run_selected()["pass"] is False
+        result = app.flash({"env": "fixed", "build": False})
+        assert result["status"] == "complete" and result["build_tag"].endswith("DEMO_BUG=0")
+        assert any(e["level"] == "FLASH" and e["data"].get("stage") == "simulated" for e in app.events)
+        assert app.run_selected()["pass"] is True
+    finally:
+        app.close()
 
 
 def test_real_flasher_drives_boot_and_en_then_runs_esptool(monkeypatch, tmp_path):
