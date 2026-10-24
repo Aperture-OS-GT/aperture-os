@@ -1,16 +1,43 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Aperture OS Console</title><link rel="stylesheet" href="/style.css"></head>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Aperture OS Console</title><link rel="stylesheet" href="/style.css"></head>
 <body>
-<aside><a class="brand" href="/">◈</a><span class="nav active">▦</span><span class="nav">⌁</span><span class="nav">⇄</span><span class="nav bottom">⚙</span></aside>
-<main>
-<header><div><div class="eyebrow">APERTURE OS <span>/</span> WORKSPACE 01</div><h1>Hardware, meet ground truth<span>.</span></h1><p>Autonomous verification for the things software can’t see.</p></div><div class="header-tag"><i></i> HIL CONSOLE <small>v0.1 / LOCAL</small></div></header>
-<section class="connection"><div class="connection-title"><i id="statusDot"></i><strong id="status">Connecting</strong><small>HIL HARNESS</small></div><label>TRANSPORT<select id="mode"><option value="sim">Simulated rig</option><option value="tcp">TCP / Wi-Fi</option><option value="rfcomm">Bluetooth RFCOMM</option></select></label><label>HOST / MAC<input id="host" value="127.0.0.1"></label><label class="port">PORT / CHANNEL<input id="port" type="number" value="8765"></label><label class="bug"><input id="bug" type="checkbox" checked><span>DEMO_BUG</span><small id="build">PLANTED</small></label><button id="connect">Connect ↗</button></section>
 <div class="workspace">
-<section class="card assistant"><div class="card-head"><h2><span class="symbol">✳</span> Verification copilot</h2><span class="pill" id="planner">OFFLINE ENGINE</span></div><div class="chat" id="chat"><div class="chat-message"><span class="avatar">◈</span><div><small>APERTURE <b>NOW</b></small><p>Your rig is ready. I’ll inject test vectors and compare every firmware claim against physical pin readback.</p></div></div></div><form id="promptForm"><textarea id="prompt" placeholder="Ask Aperture to test your hardware…" aria-label="Hardware instruction"></textarea><div class="composer-footer"><span>↵ Your instructions. Physical evidence.</span><button id="send" type="submit">Run instruction ↑</button></div></form><div class="chips"><button data-prompt="Run full safety plan">✦ Full safety plan</button><button data-prompt="Set PWM 90%">PWM 90%</button><button data-prompt="Inject fault">Inject fault</button><button data-prompt="Read state">Read state</button><button data-prompt="Reset to idle">↺ Reset to idle</button></div></section>
-<section class="card topology"><div class="card-head"><h2>Live signal topology</h2><span class="live"><i></i> LIVE READBACK</span></div><div class="board-titles"><div><span class="board-icon">▦</span><strong>Raspberry Pi</strong><small>HIL CONTROLLER · BCM</small></div><span class="link-label">3.3V LOGIC</span><div><span class="board-icon">▤</span><strong>ESP32</strong><small>DEVICE UNDER TEST</small></div></div><div id="pins"></div><div class="legend"><span><i></i> HIGH</span><span><i class="low"></i> LOW</span><span><i class="pwm"></i> PWM</span><small id="dutState">Awaiting telemetry</small></div><div class="comparison"><div class="compare-heading"><span>OUTPUT VERIFICATION</span><span>SERIAL CLAIM</span><span>PHYSICAL</span></div><div id="claims"></div></div><div class="snapshot-note" id="evidenceNote">Independent measurements. Never trust Serial alone.</div></section>
+<aside class="sidebar">
+  <a class="brand" href="/"><span class="logo">◈</span> aperture<span class="brand-os">OS</span></a>
+  <div class="section-label">WORKSPACE <span>LOCAL / 01</span></div>
+  <h2>Current session</h2>
+  <button id="newSession" class="new-session">＋ New session <span>↗</span></button>
+  <nav id="sessions" aria-label="Verification sessions"></nav>
+  <div class="profile-section"><label for="profile">DEVICE UNDER TEST</label>
+    <select id="profile"><option value="esp32_safety">ESP32 safety</option><option value="mpu6050_gyro">Gyroscope</option><option value="display">Display</option></select>
+    <p id="profileNote">GPIO-only verification.<br>Human wiring, machine evidence.</p>
+  </div>
+  <div class="sidebar-foot"><span class="online-dot"></span> All systems local<br><small>No cloud. No assumptions.</small></div>
+</aside>
+<main class="conversation">
+  <header class="main-header"><div><div class="section-label">PHYSICAL TRUTH VERIFICATION</div><h1>Aperture OS<span>.</span></h1></div>
+    <details class="transport"><summary id="linkStatus">⇄ Sim <span class="online-dot"></span> Connected <span>⌄</span></summary>
+      <div class="settings"><h3>Harness connection</h3><label>TRANSPORT<select id="mode"><option value="sim">Sim</option><option value="tcp">TCP</option><option value="rfcomm">Bluetooth RFCOMM</option></select></label><label>HOST / BLUETOOTH MAC<input id="host" value="127.0.0.1"></label><label>PORT / CHANNEL<input id="port" type="number" value="8765"></label><label class="bug"><input id="bug" type="checkbox" checked> DEMO_BUG · planted safety fault</label><button id="connect">Connect harness ↗</button><p id="connectionNote"></p></div>
+    </details>
+  </header>
+  <div class="session-heading"><span id="sessionTitle">Hardware verification</span><span class="pill" id="planner">OFFLINE ENGINE</span></div>
+  <section id="chat" class="chat" aria-label="Session transcript" aria-live="polite"></section>
+  <section id="verdict" class="verdict" hidden></section>
+  <div class="composer-area"><div id="activity">● Ready for your next experiment</div><form id="promptForm"><textarea id="prompt" rows="2" aria-label="Hardware instruction" placeholder="What would you like to test?"></textarea><div class="composer-footer"><span>Ask. Connect. Verify.</span><button id="send" type="submit" aria-label="Send instruction">↑</button></div></form>
+    <div class="chips"><button data-prompt="Test the gyroscope">✧ Test the gyroscope</button><button data-prompt="Run ESP32 safety plan">Run ESP32 safety plan</button><button data-prompt="Test display">Test display</button><button data-prompt="Read pin 24">Read pin 24</button><button id="reset">↺ Reset</button></div>
+    <div class="composer-note">3.3V logic only · Confirm wiring with power disconnected · Shared ground required</div>
+  </div>
+</main>
+<aside class="pin-panel">
+  <div class="pin-heading"><div><span class="section-label">LIVE HARDWARE</span><h2>Raspberry Pi <span>↗</span></h2><p>40-pin header <b>J8 / BCM</b></p></div><span class="live"><span class="online-dot"></span> LIVE</span></div>
+  <div class="pin-column-labels"><span>ODD / PHYSICAL</span><span>EVEN / PHYSICAL</span></div>
+  <div id="pins" class="header-stack" aria-label="Raspberry Pi 40-pin header"></div>
+  <section id="waveform" class="waveform" hidden><div class="wave-head"><strong id="waveTitle"></strong><button id="closeWave" aria-label="Close waveform">×</button></div><div id="waveDecoded"></div><svg id="trace" viewBox="0 0 400 62" role="img" aria-label="Digital waveform"></svg><div class="wave-meta"><span id="waveState"></span><span>LAST 512 OBSERVATIONS</span></div></section>
+  <div class="legend"><span><i class="pin-dot"></i>Unconnected</span><span><i class="pin-dot low"></i>LOW</span><span><i class="pin-dot high"></i>HIGH</span><span><i class="pin-dot pending"></i>Wire request</span></div>
+  <div class="direction-legend"><span class="tx">TX → Transmit</span><span class="rx">RX ← Receiving</span><small>Power & ground are fixed header rails.</small></div>
+  <a id="export" class="export" href="/api/report" download="aperture-report.json">↓ Export JSON report <span>↗</span></a>
+</aside>
 </div>
-<section id="verdict" class="verdict neutral"><span class="verdict-icon">◎</span><div><strong id="verdictTitle">Ready to verify</strong><p id="verdictDetail">Run a safety plan to validate the firmware against physical reality.</p></div><span class="verdict-meta" id="verdictMeta">NO RUN YET</span></section>
-<section class="card results"><div class="card-head"><div><h2>Safety test sequence <span class="count" id="stepCount">0 STEPS</span></h2><p>Every stimulus. Every response. Independently verified.</p></div><a class="download" href="/api/report" download="aperture-report.json">↓ Export JSON report</a></div><div class="table-wrap"><table><thead><tr><th>TEST STEP</th><th>REASONING</th><th>PINS INJECTED</th><th>LATENCY</th><th>VERDICT</th></tr></thead><tbody id="steps"><tr><td colspan="5" class="empty">No test vectors yet. Start with the full safety plan ↑</td></tr></tbody></table></div></section>
-<section class="card debug"><div class="card-head"><h2><span class="symbol">›_</span> Wire log <span class="count">RAW EVENT STREAM</span></h2><div class="debug-controls"><select id="filter" aria-label="Log level"><option value="ALL">All levels</option><option>TX</option><option>RX</option><option>AGENT</option><option>ERROR</option></select><button id="pause">Ⅱ Pause</button><button id="clear">Clear</button></div></div><div id="logs" class="logs" role="log"></div></section>
-<footer><span><i></i> All systems local. No cloud required.</span><span>APERTURE OS / PHYSICAL TRUTH VERIFICATION</span></footer>
-</main><script src="/app.js"></script></body></html>
+<details class="debug" id="debug"><summary><span>›_ Wire log <small>RAW EVENT STREAM</small></span><span id="eventCount">0 events ⌃</span></summary><div class="debug-toolbar"><select id="filter" aria-label="Log level"><option>ALL</option><option>TX</option><option>RX</option><option>REQUEST</option><option>PIN_STATE</option><option>PROFILE</option><option>AGENT</option><option>ERROR</option></select><button id="pause">Ⅱ Pause</button><button id="clear">Clear</button></div><div id="logs" class="logs" role="log"></div></details>
+<script src="/app.js"></script></body></html>

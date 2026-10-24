@@ -47,10 +47,20 @@ aperture-ui --port 8080
 
 Open **http://localhost:8080**. The offline, dark-themed console starts its own
 simulated TCP harness: no separate daemon, CDN, API key or frontend build needed.
-Click **Full safety plan** to see the red **FIRMWARE LIED** alert. The pin board
-then retains the first failed observation as labeled evidence; the rig itself
-finishes at idle. Switch DEMO_BUG off and click Connect to start a fixed simulated
-rig, then repeat the plan to see it pass. Connect applies transport and build edits.
+Choose a profile in the Current session sidebar. Yellow header pins and inline
+cards request specific wires; click **Connected ✓** on each after wiring. The last
+confirmation starts the tests automatically. ESP32 safety exposes the red
+**FIRMWARE LIED** alert; its chat cards retain claim/readback evidence even after
+the rig recovers to idle. The transport indicator opens settings; switch DEMO_BUG
+off and reconnect to contrast a fixed simulated rig.
+
+Click any GPIO pin to open its live waveform. LOW is light grey, HIGH is green,
+pending requests pulse yellow, and unwired pins are outline-only. TX/RX badges
+separate Pi transmit from receiving. Gyroscope decoded axes appear beside GPIO24
+and in its waveform. Previous session evidence is saved locally in the browser;
+select Current session to resume control. New session / Reset releases previous
+GPIO configuration and requests wiring again. Export JSON and the collapsible wire
+log preserve the raw evidence, with level filtering, pause and clear.
 
 The copilot accepts full plans, trigger high/low, PWM N%, inject/clear fault,
 read state and reset to idle. If `OPENAI_API_KEY` is set, prompts go to the existing
@@ -79,10 +89,9 @@ aperture-ui --profile mpu6050_gyro --port 8080  # own simulated harness
 aperture-ui --backend-mode rfcomm --host <Pi-MAC> --daemon-port 1 --profile mpu6050_gyro
 ```
 
-This handoff is backend-only: the old console artwork remains ESP32-specific.
-Use the API below for universal workflows; the next UI revision will expose it.
-Without `--profile`, legacy ESP32 chips/demo remain available, ungated, for backward
-compatibility. **Select a profile to enable the new human-confirmation safety gate.**
+The console supports all three profiles with human-confirmed wiring. The legacy
+API remains backward-compatible without a selected profile; the new console's
+profile picker and test chips select a profile before driving a DUT.
 
 ```sh
 curl -s localhost:8080/api/profiles/select -H 'Content-Type: application/json' -d '{"profile":"mpu6050_gyro"}'

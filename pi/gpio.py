@@ -15,6 +15,7 @@ class GenericGPIO:
         self.bus = None
         self.uart = None
         self.tick = 0
+        self.gyro_decoded = None
 
     def select_profile(self, profile):
         self.close_gpio()
@@ -103,6 +104,7 @@ class GenericGPIO:
                 self.require(2)
                 self.require(3)
                 decoded = self.read_gyro()
+                self.gyro_decoded = decoded
             elif not self.is_real:
                 self.tick += 1
         safety = None
@@ -129,6 +131,8 @@ class GenericGPIO:
                 extra["decoded"] = decoded
             if self.profile == "mpu6050_gyro" and pin == 24 and not self.is_real:
                 value = self.tick % 2
+            if self.profile == "mpu6050_gyro" and pin == 24 and self.gyro_decoded:
+                extra["decoded"] = self.gyro_decoded
             if pin in self.gpio_duties:
                 extra["duty"] = self.gpio_duties[pin]
             values.append({"pin": pin, "direction": self.gpio_config[pin], "value": int(value),

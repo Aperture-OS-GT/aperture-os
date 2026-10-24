@@ -128,6 +128,8 @@ def test_all_profiles_http(universal, profile, bug, passed):
         pins = api(base, "/api/header")["pins"]
         sda = next(pin for pin in pins if pin["bcm"] == 2)
         assert "wx" in sda["decoded"]
+        interrupt = next(pin for pin in pins if pin["bcm"] == 24)
+        assert interrupt["decoded"] == sda["decoded"]
         assert api(base, "/api/waveform?pin=24")["samples"]
     assert len(api(base, "/api/header")["pins"]) == 40
     assert len(api(base, "/api/profiles")["profiles"]) == 3
@@ -170,6 +172,7 @@ def test_request_pin_state_sse_and_empty_waveform(universal):
     base, app = universal
     assert api(base, "/api/waveform?pin=24")["samples"] == []
     cursor = app.sequence
+    assert api(base, "/api/state")["event_cursor"] == cursor
     api(base, "/api/requests/confirm", {"pi_pin": 24})
     request = Request(base + "/api/events", headers={"Last-Event-ID": str(cursor)})
     events = []

@@ -111,7 +111,8 @@ class ConsoleApp:
         return Client(self.config["host"], self.config["port"], self.config["mode"] == "rfcomm")
 
     def snapshot(self):
-        return {"connection": {**self.config, "connected": self.connected},
+        return {"event_cursor": self.sequence,
+                "connection": {**self.config, "connected": self.connected},
                 "measurement": self.measurement, "report": self.report,
                 "llm": bool(os.environ.get("OPENAI_API_KEY")),
                 "profile": self.wiring.status() if self.wiring.profile else None}
