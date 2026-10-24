@@ -58,7 +58,8 @@ class Session:
         self._seq = 0
         self._req_n = 0
         self._pending: Request | None = None
-        self._lock = threading.RLock()
+        self._lock = threading.RLock()  # session state; never held across transport I/O
+        self._io_lock = threading.RLock()  # serialises requests on the link
         self._cond = threading.Condition(self._lock)
         self._listeners: list[Callable[[dict], None]] = []
         self._journal = None
@@ -93,42 +94,43 @@ class Session:
 
     # --- connection ------------------------------------------------------------------
     def connect(self, transport: Transport, take_control: bool = True) -> dict:
-        with self._lock:
-            if self.transport is not None:
-                raise TransportError("session already has a connection; start a new session")
-            self.transport = transport
-            transport.on_ack(self._on_ack)
-            transport.on_event(self._on_bridge_event)
-            self._pending = Request("r0", "hello", {"client": transport.client}, "system")
-            self.requests["r0"] = self._pending
-            self._pending.advance("requested", t_host_us=self.now_us())
-            self.record("request.stage", "system", req="r0", stage="requested", op="hello",
-                        args=self._pending.args)
+        with self._io_lock:
+            with self._lock:
+                if self.transport is not None:
+                    raise TransportError("session already has a connection; start a new session")
+                self.transport = transport
+                transport.on_ack(self._on_ack)
+                transport.on_event(self._on_bridge_event)
+                pending = self._pending = Request("r0", "hello", {"client": transport.client}, "system")
+                self.requests["r0"] = pending
+                pending.advance("requested", t_host_us=self.now_us())
+                self.record("request.stage", "system", req="r0", stage="requested", op="hello", args=pending.args)
             try:
                 manifest = transport.connect()
             except Exception as exc:
-                self._pending.advance("executed", t_host_us=self.now_us(), ok=False, err="io", msg=str(exc),
-                                      ack="implicit")
+                with self._lock:
+                    self._pending = None
+                    self.transport = None
+                pending.advance("executed", t_host_us=self.now_us(), ok=False, err="io", msg=str(exc), ack="implicit")
                 self.record("request.stage", "system", req="r0", stage="executed", ok=False, err="io", msg=str(exc))
-                self._pending = None
-                self.transport = None
                 raise
-            self._pending.advance("executed", t_host_us=self.now_us(), ok=True, result={"manifest": manifest},
-                                  ack=None if "acknowledged" in self._pending.stages else "implicit")
-            self.record("request.stage", "system", req="r0", stage="executed", ok=True)
-            self._pending.advance("observed", t_host_us=self.now_us(), observe="manifest")
-            self.record("request.stage", "system", req="r0", stage="observed", observe="manifest")
-            self._pending = None
-            self.manifest = manifest
-            self.record("session.start", "system", session=self.id, created_at=self.created_at,
-                        transport=transport.describe(), manifest=manifest,
-                        clock={"offset_us": transport.clock_offset_us})
+            with self._lock:
+                self._pending = None
+                pending.advance("executed", t_host_us=self.now_us(), ok=True, result={"manifest": manifest},
+                                ack=None if "acknowledged" in pending.stages else "implicit")
+                self.record("request.stage", "system", req="r0", stage="executed", ok=True)
+                pending.advance("observed", t_host_us=self.now_us(), observe="manifest")
+                self.record("request.stage", "system", req="r0", stage="observed", observe="manifest")
+                self.manifest = manifest
+                self.record("session.start", "system", session=self.id, created_at=self.created_at,
+                            transport=transport.describe(), manifest=manifest,
+                            clock={"offset_us": transport.clock_offset_us})
             if take_control:
                 self.request("control.take", actor="system")
             return manifest
 
     def disconnect(self, reason: str = "user") -> None:
-        with self._lock:
+        with self._io_lock:
             if self.transport is None:
                 return
             if self.transport.connected and self.transport.control_token:
@@ -166,25 +168,25 @@ class Session:
         """Run one protocol op through the full lifecycle. Returns the Request (check ``.ok``)."""
         if self.transport is None:
             raise TransportError("session is not connected")
-        with self._lock:
-            self._req_n += 1
-            request = Request(f"r{self._req_n}", op, _jsonable(args), actor or self.actor)
-            self.requests[request.id] = request
-            request.advance("requested", t_host_us=self.now_us())
-            self.record("request.stage", request.actor, req=request.id, stage="requested", op=op, args=request.args)
-            self._pending = request
+        with self._io_lock:
+            with self._lock:
+                self._req_n += 1
+                request = Request(f"r{self._req_n}", op, _jsonable(args), actor or self.actor)
+                self.requests[request.id] = request
+                request.advance("requested", t_host_us=self.now_us())
+                self.record("request.stage", request.actor, req=request.id, stage="requested", op=op,
+                            args=request.args)
+                self._pending = request
             try:
                 response = self.transport.request(op, **args)
             except (TransportError, OSError, ProtocolError) as exc:
                 response = Response(-1, False, 0, {}, "timeout" if "timeout" in str(exc).lower() else "io", str(exc))
             finally:
-                self._pending = None
-            if "acknowledged" not in request.stages:
-                request.advance("executed", t_host_us=self.now_us(), ack="implicit", ok=response.ok,
-                                err=response.err, result=response.result, t_bridge_us=response.t_bridge_us)
-            else:
-                request.advance("executed", t_host_us=self.now_us(), ok=response.ok, err=response.err,
-                                result=response.result, t_bridge_us=response.t_bridge_us)
+                with self._lock:
+                    self._pending = None
+            ack = {} if "acknowledged" in request.stages else {"ack": "implicit"}
+            request.advance("executed", t_host_us=self.now_us(), **ack, ok=response.ok, err=response.err,
+                            result=response.result, t_bridge_us=response.t_bridge_us)
             self.record("request.stage", "bridge", req=request.id, stage="executed", ok=response.ok,
                         err=response.err, msg=response.msg, result=response.result, t_bridge_us=response.t_bridge_us)
             if op == "uart.write":

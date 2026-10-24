@@ -34,7 +34,8 @@ class ApiError(Exception):
 
 
 class ConsoleApp:
-    def __init__(self, home: str | None = None, actor: str = "tester"):
+    def __init__(self, home: str | None = None, actor: str = "tester", llm: bool | None = None,
+                 agent_factory=None):
         self.home = home
         self.actor = actor
         self.lock = threading.RLock()
@@ -44,6 +45,13 @@ class ConsoleApp:
         self.feed: list[dict] = []          # every session event + console notices, with a global cursor
         self.replay: dict | None = None
         self.busy = False
+        self.mcp_url: str | None = None
+        self._mcp_server = None
+        self._agent_factory = agent_factory
+        if llm is None:
+            from .agent import openai_available
+            llm = openai_available()
+        self.llm = bool(llm)
         self._new_session()
 
     # --- session plumbing ------------------------------------------------------------
@@ -112,7 +120,7 @@ class ConsoleApp:
                 "behaviors": [b.describe() for b in rig.behaviors] if rig else [],
                 "replay": self.replay["id"] if self.replay else None,
                 "scenarios": list_scenarios(),
-                "llm": False,
+                "llm": self.llm, "mcp": self.mcp_url,
             }
 
     # --- actions --------------------------------------------------------------------------
@@ -191,10 +199,22 @@ class ConsoleApp:
         text = data.get("prompt")
         if not isinstance(text, str) or not text.strip() or len(text) > 4000:
             raise ApiError(400, "prompt must be text up to 4000 characters")
+        use_llm = self.llm and data.get("mode") != "rules"
         with self.lock:
             if self.replay:
                 raise ApiError(409, "exit replay before using the agent")
+            if use_llm and self.busy:
+                raise ApiError(409, "the agent is already running")
             self.session.note(text.strip(), "tester")
+            if use_llm:
+                self.busy = True
+        if use_llm:
+            try:
+                return self._prompt_llm(text.strip(), data.get("save_as"))
+            finally:
+                with self.lock:
+                    self.busy = False
+        with self.lock:
             from .intent import interpret
             action = interpret(text, self.state())
             if action["kind"] == "plan":
@@ -224,6 +244,53 @@ class ConsoleApp:
                 return {"reply": reply, "results": results}
             self.session.note(action["reply"], "agent")
             return {"reply": action["reply"]}
+
+    # --- OpenAI agent over MCP --------------------------------------------------------------
+    @property
+    def mcp_server(self):
+        """MCP server bound to this console's session: the agent (and external MCP clients) drive the
+        same rig, log and lifecycle the tester sees."""
+        if self._mcp_server is None:
+            from .mcp_server import RigHost, build_server
+            self._mcp_server = build_server(RigHost(lambda: self.tools, self.lock, self.home))
+        return self._mcp_server
+
+    def serve_mcp(self, port: int, host: str = "127.0.0.1") -> str:
+        from .mcp_server import start_http_thread
+        start_http_thread(self.mcp_server, host, port)
+        self.mcp_url = f"http://{host}:{port}/mcp"
+        return self.mcp_url
+
+    def _agent_context(self) -> str:
+        with self.lock:
+            transport = self.session.transport
+            manifest = self.session.manifest or {}
+            wiring = {str(k): v for k, v in self.session.wiring.items()}
+            return (f"Rig: connected={self._connected()}, transport={transport.kind if transport else None}, "
+                    f"bridge={manifest.get('bridge')}, fw={manifest.get('fw')}, "
+                    f"controller={bool(transport and transport.control_token)}. Confirmed wiring: {json.dumps(wiring)}")
+
+    def _prompt_llm(self, text: str, save_as: str | None = None) -> dict:
+        from .agent import RigAgent
+        factory = self._agent_factory or (lambda server: RigAgent(server))
+        agent = factory(self.mcp_server)
+        self._notice("agent.started", prompt=text)
+        try:
+            result = agent.run(text, save_as=save_as, context=self._agent_context())
+        except Exception as exc:  # noqa: BLE001 - OpenAI/network errors: report, keep the console alive
+            self._notice("agent.error", msg=f"{type(exc).__name__}: {exc}")
+            raise ApiError(502, f"agent failed: {type(exc).__name__}: {exc}") from None
+        plan = None
+        with self.lock:
+            self.session.note(result.reply, "agent")
+            if result.plan:
+                try:
+                    plan = load_plan_inline(result.plan)
+                    self._notice("plan.compiled", plan=plan)
+                except (ApiError, PlanError):
+                    plan = None
+        return {"reply": result.reply, "llm": True, "verdict": result.verdict, "plan": plan, "saved": result.saved,
+                "results": [{"tool": c.tool, "ok": c.ok, "args": c.args} for c in result.calls]}
 
     def run_plan(self, slug: str, data: dict | None = None) -> dict:
         with self.lock:
@@ -445,8 +512,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": str(exc)})
 
 
-def serve(host: str = "127.0.0.1", port: int = 8080, home: str | None = None, open_browser: bool = False):
+def serve(host: str = "127.0.0.1", port: int = 8080, home: str | None = None, open_browser: bool = False,
+          mcp_port: int | None = None):
     app = ConsoleApp(home=home)
+    if mcp_port:
+        print(f"MCP server (shares this session): {app.serve_mcp(mcp_port, host)}")
+    print(f"Agent: {'OpenAI ' + __import__('os').environ.get('OPENAI_MODEL', 'gpt-4o-mini') if app.llm else 'rules (set OPENAI_API_KEY for the OpenAI agent)'}")
     server = HTTPServer((host, port), app)
     url = f"http://{host}:{server.server_address[1]}"
     print(f"Aperture OS console: {url}")
@@ -467,8 +538,9 @@ def main(argv=None):
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--home")
     parser.add_argument("--open", action="store_true")
+    parser.add_argument("--mcp-port", type=int, help="also expose the rig tools over MCP (streamable HTTP)")
     args = parser.parse_args(argv)
-    serve(port=args.port, home=args.home, open_browser=args.open)
+    serve(port=args.port, home=args.home, open_browser=args.open, mcp_port=args.mcp_port)
 
 
 if __name__ == "__main__":  # pragma: no cover

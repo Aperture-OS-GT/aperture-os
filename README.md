@@ -279,6 +279,61 @@ t.rig.behavior("button").press(); t.rig.advance(20_000)   # LED on GPIO17 follow
 `tests/conformance/` holds the protocol conformance suite every transport/bridge
 pair must pass identically.
 
+## Pi bridge daemon: `pi/bridge/` (protocol v1 over BLE GATT or TCP)
+
+`aperture-bridge` runs on the Pi. All links share one engine, so the take-control
+handshake (one controller; `busy` for everyone else; `force` only once the holder
+is idle), the watchdog and the fail-safe release (every output back to
+high-impedance on disconnect, watchdog timeout or daemon exit) are identical.
+
+```bash
+pip install -e '.[bridge]'                  # bless (GATT), lgpio, pyserial, spidev, smbus2
+aperture-bridge --ble                       # production: advertise the Aperture GATT service, real GPIO
+aperture-bridge --ble --tcp 127.0.0.1:8766  # plus a bench TCP link (unauthenticated, lab only)
+aperture-bridge --virtual button_led --tcp  # no Pi: realtime Virtual Rig behind the same daemon
+```
+
+* `pi.bridge.core` — ack -> execute -> respond, event fan-out, per-link control tokens, watchdog pump.
+* `pi.bridge.hardware` — `HardwareRig`: the VirtualRig control/capture/stream machinery on real pins via
+  `LgpioDriver` (Pi 4/5: GPIO alerts feed captures and `pin.change`, UART on GPIO14/15 via `/dev/serial0`,
+  SPI via spidev, I2C via smbus2). `FakeDriver` backs the hardware-free tests.
+* `pi.bridge.gatt` — service `6e0a7e00-5a1d-4e0a-9f3c-617065727475`; CMD (write) / RSP (notify) /
+  EVT (notify) characteristics carrying CBOR chunked to the MTU.
+* Host side: `aperture.transport.TcpTransport` (`tcp`, target `host:port`) and `BleTransport`
+  (`ble`, target = name, address or empty for the first Aperture bridge; `pip install -e '.[ble]'`).
+  Both keep control alive with pings so the watchdog only fires when the host is really gone.
+
+## MCP server and the OpenAI agent
+
+The rig tool set (`connect`, `list_pins`, `set_mode`, `write`, `read`, `pulse`, `pwm`, `uart_send`,
+`uart_expect`, `spi_xfer`, `i2c_*`, `capture`, `assert_pin`, `assert_timeline`, `assert_frequency`,
+`wait_for`, ...) plus `save_plan` / `run_plan` / `list_plans` / `session_log` is served over MCP
+(`aperture/mcp_server.py`). Every MCP call is a logged session request with the full
+requested -> acknowledged -> executed -> observed lifecycle, over whichever transport is connected.
+
+```bash
+aperture mcp                                            # stdio (Claude Desktop, Cursor, any MCP client)
+aperture mcp --http 8765 --transport tcp --target pi.local:8766   # streamable HTTP at /mcp
+aperture-ui --mcp-port 8765                             # console + MCP on the same live session
+```
+
+The OpenAI agent (`aperture/agent.py`) is an MCP client: it lists the MCP tools, passes them to the
+Chat Completions API as function tools, executes each tool call through MCP, and turns the
+successful calls into a deterministic plan (assertions marked) that runs later without the agent.
+
+```bash
+pip install -e '.[llm]'
+export OPENAI_API_KEY=...            # never commit it; OPENAI_MODEL / OPENAI_BASE_URL optional
+aperture agent "confirm GPIO17 goes high within 50 ms of pressing the button on GPIO22" \
+    --scenario button_led --save-plan button-led
+aperture agent "..." --mcp http://127.0.0.1:8765/mcp      # drive a running MCP server instead
+aperture plan run button-led --scenario button_led         # re-run deterministically, no agent
+```
+
+With `OPENAI_API_KEY` set, console prompts go to this agent over an in-process MCP server bound to
+the console session, so the tester watches each tool call land in the log and on the pin map
+(send `"mode": "rules"` to use the offline rules interpreter instead).
+
 ## Development
 
 `ruff check . && pytest -q`; `make demo`. See [protocol](docs/protocol.md).

@@ -1,22 +1,36 @@
 """Protocol v1 conformance: every Transport/bridge pair must pass these identically.
 
-Add new fixtures (TCP -> bridge sim, BLE -> bench) to ``params`` as they land.
+``tcp`` runs the real host TcpTransport against the real Pi bridge daemon core
+(``pi.bridge``) serving a realtime Virtual Rig, so the wire, acks, control and
+fail-safe paths are exercised end to end without a Pi. BLE shares the same
+bridge core; its framing is covered in tests/test_bridge.py.
 """
 import pytest
 
 from aperture.protocol import OPS
-from aperture.transport import VirtualTransport
+from aperture.rig.virtual import VirtualRig, load_scenario
+from aperture.transport import TcpTransport, VirtualTransport
+from pi.bridge.core import BridgeCore
+from pi.bridge.tcp import TcpBridgeServer
 
 
-@pytest.fixture(params=["virtual"])
+@pytest.fixture(params=["virtual", "tcp"])
 def transport(request):
+    server = core = None
     if request.param == "virtual":
         t = VirtualTransport(scenario="loopback")
-    else:  # pragma: no cover
-        pytest.skip(request.param)
+    else:
+        core = BridgeCore(VirtualRig(load_scenario("loopback"), realtime=True))
+        server = TcpBridgeServer(core, "127.0.0.1", 0)
+        server.start()
+        t = TcpTransport(f"127.0.0.1:{server.port}")
     t.connect()
     yield t
     t.disconnect()
+    if server is not None:
+        server.shutdown()
+        server.server_close()
+        core.close()
 
 
 def test_hello_manifest(transport):
