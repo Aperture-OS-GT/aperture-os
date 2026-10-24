@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aperture-os"
+version = "0.1.0"
+description = "Physical truth verification for embedded firmware"
+requires-python = ">=3.10"
+dependencies = ["rich>=13"]
+license = {text = "MIT"}
+
+[project.optional-dependencies]
+pi = ["gpiozero>=2", "pyserial>=3.5"]
+llm = ["openai>=1"]
+dev = ["pytest>=8", "ruff>=0.9"]
+
+[project.scripts]
+aperture-daemon = "pi.daemon:main"
+aperture-agent = "agent.main:main"
+
+[tool.setuptools.packages.find]
+include = ["pi*", "agent*"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
