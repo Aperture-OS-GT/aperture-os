@@ -129,21 +129,14 @@ class ConsoleApp:
                 self.lock.release()
 
     def _keepalive_tick(self) -> None:
-        """Runs under the console lock, so no ``Session.request`` is in flight: the session's ack
-        callback has nothing pending and ignores the ping's (unknown) request id, and the ping
-        stays out of the session log."""
+        """Re-take control if the bridge watchdog took it while still connected. Feeding the
+        watchdog is the Session's job (its keepalive pings under the session lock); pinging the
+        transport from here as well could deadlock against Session.request's lock order."""
         transport = self.session.transport
         if not self._connected() or _manual_clock(transport):
             return
-        if transport.control_token is None:
-            if self._control_lost:
-                self._retake_control()
-            return
-        if getattr(transport, "keepalive", False):
-            return  # TcpTransport pings by itself at half the watchdog period
-        if time.monotonic() - self._fed_at >= _watchdog_s(transport) / KEEPALIVE_FRACTION:
-            self._fed_at = time.monotonic()
-            transport.request("ping")
+        if transport.control_token is None and self._control_lost:
+            self._retake_control()
 
     def _retake_control(self) -> None:
         """Control was lost to the watchdog while still connected: take it back once and say so."""
