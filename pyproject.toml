@@ -21,9 +21,10 @@ aperture-agent = "agent.main:main"
 aperture-ui = "ui.server:main"
 
 [tool.setuptools.packages.find]
-include = ["pi*", "agent*", "ui*", "profiles*"]
+include = ["aperture*", "pi*", "agent*", "ui*", "profiles*"]
 
 [tool.setuptools.package-data]
+"aperture.rig" = ["scenarios/*.json"]
 ui = ["static/*"]
 profiles = ["*.json"]
 

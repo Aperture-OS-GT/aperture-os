@@ -1,0 +1,2 @@
+{"name": "loopback", "title": "Loopback pairs", "description": "GPIO17<->GPIO27 and GPIO22<->GPIO23 tied with jumper wires.",
+ "behaviors": [{"type": "Loopback", "a": 17, "b": 27}, {"type": "Loopback", "a": 22, "b": 23}], "wiring_policy": "off"}

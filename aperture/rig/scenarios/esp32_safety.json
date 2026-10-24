@@ -1,0 +1,4 @@
+{"name": "esp32_safety", "title": "ESP32 safety controller (planted bug)", "description": "Demo firmware with DEMO_BUG=1: the safety relay is not released when a fault arrives while the trigger is high or PWM duty > 80 %.",
+ "behaviors": [{"type": "ScriptedDut", "name": "esp32", "demo_bug": true},
+               {"type": "I2cRegisterDevice", "name": "mpu6050", "addr": 104, "registers": {"0x75": 104, "0x3b": 1, "0x3c": 2}}],
+ "wiring_policy": "ask"}

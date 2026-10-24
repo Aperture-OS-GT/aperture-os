@@ -1,0 +1,4 @@
+{"name": "esp32_safety_fixed", "title": "ESP32 safety controller (fixed)", "description": "Same DUT with DEMO_BUG=0: the safety relay always follows the fault input.",
+ "behaviors": [{"type": "ScriptedDut", "name": "esp32", "demo_bug": false},
+               {"type": "I2cRegisterDevice", "name": "mpu6050", "addr": 104, "registers": {"0x75": 104}}],
+ "wiring_policy": "ask"}
