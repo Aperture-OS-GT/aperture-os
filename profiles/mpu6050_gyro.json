@@ -1,0 +1,14 @@
+{
+  "id":"mpu6050_gyro","component":"MPU6050 gyroscope",
+  "notes":"3.3V I2C bus 1, address 0x68 (AD0 low), common ground; enable I2C on Pi. SDA/SCL are peripheral-owned bidirectional lines; tx describes Pi bus ownership, not push-pull output.",
+  "wires":[
+    {"pi_pin":2,"dut_pin":"SDA","direction":"tx","label":"Gyroscope SDA"},
+    {"pi_pin":3,"dut_pin":"SCL","direction":"tx","label":"Gyroscope SCL"},
+    {"pi_pin":24,"dut_pin":"INT","direction":"rx","label":"Data ready"}
+  ],
+  "tests":[
+    {"name":"WHO_AM_I","expect":{"who_am_i":104}},
+    {"name":"Data ready interrupt","expect":{"toggle_pin":24}},
+    {"name":"Angular velocity range","expect":{"axes":["wx","wy","wz"],"min":-250,"max":250}}
+  ]
+}

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Aperture OS Console</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<div class="workspace">
+<aside class="sidebar">
+  <a class="brand" href="/"><span class="logo">◈</span> aperture<span class="brand-os">OS</span></a>
+  <div class="section-label">WORKSPACE <span>LOCAL / 01</span></div>
+  <h2>Current session</h2>
+  <button id="newSession" class="new-session">＋ New session <span>↗</span></button>
+  <nav id="sessions" aria-label="Verification sessions"></nav>
+  <div class="profile-section"><label for="profile">DEVICE UNDER TEST</label>
+    <select id="profile"><option value="esp32_safety">ESP32 safety</option><option value="mpu6050_gyro">Gyroscope</option><option value="display">Display</option></select>
+    <p id="profileNote">GPIO-only verification.<br>Human wiring, machine evidence.</p>
+  </div>
+  <div class="sidebar-foot"><span class="online-dot"></span> All systems local<br><small>No cloud. No assumptions.</small></div>
+</aside>
+<main class="conversation">
+  <header class="main-header"><div><div class="section-label">PHYSICAL TRUTH VERIFICATION</div><h1>Aperture OS<span>.</span></h1></div>
+    <details class="transport"><summary id="linkStatus">⇄ Sim <span class="online-dot"></span> Connected <span>⌄</span></summary>
+      <div class="settings"><h3>Harness connection</h3><label>TRANSPORT<select id="mode"><option value="sim">Sim</option><option value="tcp">TCP</option><option value="rfcomm">Bluetooth RFCOMM</option></select></label><label>HOST / BLUETOOTH MAC<input id="host" value="127.0.0.1"></label><label>PORT / CHANNEL<input id="port" type="number" value="8765"></label><label class="bug"><input id="bug" type="checkbox" checked> DEMO_BUG · planted safety fault</label><button id="connect">Connect harness ↗</button><p id="connectionNote"></p></div>
+    </details>
+  </header>
+  <div class="session-heading"><span id="sessionTitle">Hardware verification</span><span class="pill" id="planner">OFFLINE ENGINE</span></div>
+  <section id="chat" class="chat" aria-label="Session transcript" aria-live="polite"></section>
+  <section id="verdict" class="verdict" hidden></section>
+  <div class="composer-area"><div id="activity">● Ready for your next experiment</div><form id="promptForm"><textarea id="prompt" rows="2" aria-label="Hardware instruction" placeholder="What would you like to test?"></textarea><div class="composer-footer"><span>Ask. Connect. Verify.</span><button id="send" type="submit" aria-label="Send instruction">↑</button></div></form>
+    <div class="chips"><button data-prompt="Test the gyroscope">✧ Test the gyroscope</button><button data-prompt="Run ESP32 safety plan">Run ESP32 safety plan</button><button data-prompt="Test display">Test display</button><button data-prompt="Read pin 24">Read pin 24</button><button id="reset">↺ Reset</button></div>
+    <div class="composer-note">3.3V logic only · Confirm wiring with power disconnected · Shared ground required</div>
+  </div>
+</main>
+<aside class="pin-panel">
+  <div class="pin-heading"><div><span class="section-label">LIVE HARDWARE</span><h2>Raspberry Pi <span>↗</span></h2><p>40-pin header <b>J8 / BCM</b></p></div><span class="live"><span class="online-dot"></span> LIVE</span></div>
+  <div class="pin-column-labels"><span>ODD / PHYSICAL</span><span>EVEN / PHYSICAL</span></div>
+  <div id="pins" class="header-stack" aria-label="Raspberry Pi 40-pin header"></div>
+  <section id="waveform" class="waveform" hidden><div class="wave-head"><strong id="waveTitle"></strong><button id="closeWave" aria-label="Close waveform">×</button></div><div id="waveDecoded"></div><svg id="trace" viewBox="0 0 400 62" role="img" aria-label="Digital waveform"></svg><div class="wave-meta"><span id="waveState"></span><span>LAST 512 OBSERVATIONS</span></div></section>
+  <div class="legend"><span><i class="pin-dot"></i>Unconnected</span><span><i class="pin-dot low"></i>LOW</span><span><i class="pin-dot high"></i>HIGH</span><span><i class="pin-dot pending"></i>Wire request</span></div>
+  <div class="direction-legend"><span class="tx">TX → Transmit</span><span class="rx">RX ← Receiving</span><small>Power & ground are fixed header rails.</small></div>
+  <a id="export" class="export" href="/api/report" download="aperture-report.json">↓ Export JSON report <span>↗</span></a>
+</aside>
+</div>
+<details class="debug" id="debug"><summary><span>›_ Wire log <small>RAW EVENT STREAM</small></span><span id="eventCount">0 events ⌃</span></summary><div class="debug-toolbar"><select id="filter" aria-label="Log level"><option>ALL</option><option>TX</option><option>RX</option><option>REQUEST</option><option>PIN_STATE</option><option>PROFILE</option><option>AGENT</option><option>ERROR</option></select><button id="pause">Ⅱ Pause</button><button id="clear">Clear</button></div><div id="logs" class="logs" role="log"></div></details>
+<script src="/app.js"></script></body></html>
