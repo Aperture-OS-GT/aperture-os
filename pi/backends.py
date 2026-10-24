@@ -23,6 +23,13 @@ class SimBackend(GenericGPIO):
     def apply(self, **values):
         self.inputs.update(values)
 
+    def on_flashed(self, result):
+        tag = result.get("build_tag") or ""
+        if "DEMO_BUG=" in tag:
+            self.demo_bug = tag.split("DEMO_BUG=", 1)[1][:1] == "1"
+        self.inputs = {"trig": 0, "pwm": 0.0, "fault": 0}
+        self.safety = 1
+
     def read(self):
         trig, pwm, fault = (self.inputs[k] for k in ("trig", "pwm", "fault"))
         state = "FAULT_SHUTDOWN" if fault else (
@@ -47,8 +54,8 @@ class RealBackend(GenericGPIO):
     is_real = True
 
     def __init__(self, serial_port="/dev/serial0", profile="esp32_safety"):
-        self.init_gpio(profile)
         self.serial_port = serial_port
+        self.init_gpio(profile)
 
     def legacy_setup(self):
         for pin, direction in ((17, "tx"), (18, "tx"), (27, "tx"), (22, "rx"), (23, "rx")):

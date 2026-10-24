@@ -1,7 +1,9 @@
 """Strict command validation shared by both transports."""
 import json
 import math
+import re
 
+from pi.flash import BAUDS, MAX_CHUNK_CHARS, MAX_IMAGE_BYTES
 from pi.header import GPIO_PINS
 
 MAX_LINE = 65536
@@ -27,6 +29,8 @@ def parse_command(line):
         "write": {"pin", "val"}, "pwm": {"pin", "duty", "freq"},
         "read": {"pins"}, "sample": {"pins", "duration_ms", "rate_hz"},
         "release": {"pin"}, "select_profile": {"profile"},
+        "flash_begin": {"images"}, "flash_chunk": {"index", "data"},
+        "flash_run": {"baud", "boot_pin", "en_pin"},
     }
     if not isinstance(cmd, str) or cmd not in fields:
         raise ValueError("unknown command")
@@ -56,6 +60,26 @@ def parse_command(line):
         "esp32_safety", "mpu6050_gyro", "display"
     ):
         raise ValueError("unknown profile")
+    if cmd == "flash_begin":
+        images = command["images"]
+        if (not isinstance(images, list) or not 1 <= len(images) <= 8 or any(
+                not isinstance(image, dict) or set(image) != {"offset", "size", "sha256"} or
+                type(image["offset"]) is not int or not 0 <= image["offset"] < MAX_IMAGE_BYTES or
+                type(image["size"]) is not int or not 1 <= image["size"] <= MAX_IMAGE_BYTES or
+                not isinstance(image["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", image["sha256"])
+                for image in images) or sum(image["size"] for image in images) > MAX_IMAGE_BYTES):
+            raise ValueError("images must be 1..8 {offset,size,sha256} entries within 4 MiB")
+    if cmd == "flash_chunk" and (type(command["index"]) is not int or
+                                 not isinstance(command["data"], str) or
+                                 not 0 < len(command["data"]) <= MAX_CHUNK_CHARS):
+        raise ValueError("flash_chunk needs an integer index and base64 data up to 48 KiB")
+    if cmd == "flash_run":
+        boot_pin, en_pin = command["boot_pin"], command["en_pin"]
+        if type(command["baud"]) is not int or command["baud"] not in BAUDS:
+            raise ValueError(f"baud must be one of {BAUDS}")
+        if (type(en_pin) is not int or en_pin not in GPIO_PINS or boot_pin == en_pin or
+                (boot_pin is not None and (type(boot_pin) is not int or boot_pin not in GPIO_PINS))):
+            raise ValueError("en_pin must be a BCM GPIO; boot_pin a different BCM GPIO or null")
     for key in ("val", "trig", "fault", "expected"):
         if key in command and (type(command[key]) is not int or command[key] not in (0, 1)):
             raise ValueError(f"{key} must be 0 or 1")

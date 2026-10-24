@@ -92,7 +92,8 @@ async function wave() {
   $('waveState').textContent=values.length+' samples · '+(state?.connected?'LIVE':'NOT CONNECTED');
 }
 function setDisabled() {
-  document.querySelectorAll('[data-confirm],[data-reject],.chips button,#send,#newSession,#connect,#profile').forEach(b=>b.disabled=busy||!!historyView);
+  document.querySelectorAll('[data-confirm],[data-reject],.chips button,#send,#newSession,#connect,#profile,#flash').forEach(b=>b.disabled=busy||!!historyView);
+  if(!busy&&!historyView&&selected?.profile.id!=='esp32_safety')$('flash').disabled=true;
   $('activity').textContent=historyView?'◌ Viewing saved evidence · select current session to resume':busy?'◌ Measuring hardware…':'● Ready for your next experiment';
 }
 async function action(fn) {
@@ -117,6 +118,7 @@ async function selectProfile(id, newSession=false, prompt=null) {
 }
 async function instruction(prompt) {
   if(/reset/i.test(prompt)) { await selectProfile($('profile').value,true,prompt);return; }
+  if(/flash/i.test(prompt)) { await api('/api/prompt',{prompt});return; }
   const profile=/gyro/i.test(prompt)?'mpu6050_gyro':/esp32/i.test(prompt)?'esp32_safety':/display/i.test(prompt)?'display':null;
   if(profile) {
     $('profile').value=profile;
@@ -148,6 +150,14 @@ $('chat').onclick=event=>{
 $('pins').onclick=event=>{const button=event.target.closest('[data-pin]');if(button){waveformPin=Number(button.dataset.pin);renderPins();wave().catch(e=>message(e.message));}};
 $('closeWave').onclick=()=>{waveformPin=null;$('waveform').hidden=true;renderPins();};
 $('sessions').onclick=event=>{const button=event.target.closest('[data-session]');if(!button)return;historyView=Number(button.dataset.session)===current.id?null:Number(button.dataset.session);sessionButtons();renderChat();};
+async function flashFirmware() {
+  const env=$('flashEnv').value, manual=$('flashManual').checked;
+  message('Flash the '+(env==='fixed'?'fixed':'DEMO_BUG')+' firmware over the Pi header UART.',true);
+  const result=await api('/api/flash',{env,build:$('flashBuild').checked,manual_boot:manual});
+  if(result.status==='waiting_for_connections'){message('Flashing needs confirmed wires on Pi GPIO '+result.missing.join(', ')+' first: TX0, RX0, EN'+(manual?'':', BOOT')+'. Confirm them in the cards above.');return;}
+  message('Flashed '+env+' in '+result.seconds+' s ('+(result.build_tag||'no build tag')+'). Run the safety plan again to re-verify.');
+}
+$('flash').onclick=()=>action(flashFirmware);
 $('connect').onclick=()=>action(async()=>{await api('/api/connect',{mode:$('mode').value,host:$('host').value,port:Number($('port').value),demo_bug:$('bug').checked});$('connectionNote').textContent='Harness connected. Wiring confirmations reset.';await refreshState();});
 $('mode').onchange=()=>{$('bug').disabled=$('mode').value!=='sim';};
 $('filter').onchange=renderLogs;
@@ -181,6 +191,7 @@ async function start() {
     if(event.level==='USER'||event.level==='AGENT')message(event.data.reply,event.level==='USER');
     if(event.level==='STEP')addEntry({type:'step',row:event.data});
     if(event.level==='REPORT'){current.report=event.data;renderChat();sessionButtons();}
+    if(event.level==='FLASH'){const d=event.data;$('flashNote').textContent=d.stage==='upload'?'Uploading '+(d.name||'')+' '+d.received+'/'+d.size+' bytes':d.stage==='build'?'Building '+d.env+' with PlatformIO…':d.stage==='start'?'Resetting ESP32 into bootloader, writing '+d.images.length+' images…':d.stage==='done'?'Flashed '+d.env+' in '+d.seconds+' s':d.stage==='waiting'?'Waiting for wires: GPIO '+d.missing.join(', '):'';}
   };
   events.onerror=()=>{$('linkStatus').textContent='⇄ Event stream reconnecting…';};
   events.onopen=()=>{refreshState().catch(()=>{});};

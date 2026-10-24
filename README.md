@@ -134,38 +134,74 @@ starts without opening a DUT UART unless the ESP32 profile actually reads it.
 
 ## Wiring (Pi numbering is BCM)
 
-| Signal | Raspberry Pi | ESP32 | Direction / purpose |
+![Pi 4 to ESP32 DevKit V1 wiring](docs/wiring-pi4-esp32-devkit-v1.svg)
+
+| Signal | Raspberry Pi | ESP32 DevKit V1 label | Direction / purpose |
 |---|---|---|---|
-| Common ground | GND physical pin 6 | GND | Shared reference |
-| Telemetry RX | GPIO15, physical 10 | GPIO17 TX2 | DUT → Pi UART 115200 |
-| UART TX | GPIO14, physical 8 | GPIO16 RX2 | Pi → DUT UART (reserved for future commands) |
-| Digital trigger | GPIO17, physical 11 | GPIO4 | Pi → DUT sensor / trigger |
-| PWM | GPIO18, physical 12 | GPIO5 | Pi → DUT 100 Hz duty |
-| Fault | GPIO27, physical 13 | GPIO18 | Pi → DUT active-high fault |
-| Actuator readback | GPIO22, physical 15 | GPIO19 | DUT → Pi |
-| Safety readback | GPIO23, physical 16 | GPIO21 | DUT → Pi, high = armed |
+| Common ground | GND physical pin 6 | GND | Shared reference, wire first |
+| Power (optional) | 5V physical pin 2 | VIN | Powers the ESP32 from the Pi; or use a 5 V charger on micro-USB |
+| Digital trigger | GPIO17, physical 11 | D4 | Pi → DUT sensor / trigger |
+| PWM | GPIO18, physical 12 | D5 | Pi → DUT 100 Hz duty |
+| Fault | GPIO27, physical 13 | D18 | Pi → DUT active-high fault |
+| Actuator readback | GPIO22, physical 15 | D19 | DUT → Pi (+ optional LED to GND) |
+| Safety readback | GPIO23, physical 16 | D21 | DUT → Pi, high = armed (+ optional LED to GND) |
+| UART0 RX | GPIO15 RXD, physical 10 | TX0 | DUT → Pi: JSON telemetry 115200 and esptool replies |
+| UART0 TX | GPIO14 TXD, physical 8 | RX0 | Pi → DUT: esptool flash data |
+| Reset (flash only) | GPIO25, physical 22 | EN | Pi pulses LOW to reset the ESP32 |
+| Boot select (flash only) | GPIO24, physical 18 | BOOT button leg (GPIO0) | Held LOW through reset to enter the ROM bootloader |
 
 **3.3 V only.** Share ground; use 330 Ω–1 kΩ series resistors. Disconnect power
 before wiring. Never connect 5 V signals. Do not drive motors/relays directly from
 GPIO: use suitable buffered, protected drivers and a separate load supply.
 This demo is not a certified safety system; test with LEDs before real loads.
 
+The 30-pin DevKit V1 does not expose GPIO0 on its header: solder a short wire to the
+non-ground leg of the BOOT button, or leave the GPIO24 wire out and hold BOOT by hand
+when flashing with *manual boot*. EN and BOOT are `optional` profile wires: tests run
+without them, flashing requires them (BOOT unless manual).
+
+### Demo parts
+
+1× Raspberry Pi 4 Model B (any Pi with the 40-pin header; Pi 5 may need a different gpiozero
+pin factory), 1× ESP32 DevKit V1 (30-pin, `esp32dev`), 1× breadboard, ~10 female–male and
+~10 male–male jumpers, 9× 330 Ω–1 kΩ resistors for the signal wires, 2× LEDs + 2× 330 Ω for
+the D19/D21 indicators, a 5 V supply for the ESP32 (Pi 5V pin with a 3 A Pi PSU, or a
+charger on micro-USB without a data connection) and a laptop running `aperture-ui`
+(Linux for Bluetooth RFCOMM, any OS over TCP).
+
 ## Firmware and hardware
 
 ```sh
 pip install platformio
-pio run -d firmware/esp32 -e esp32dev -t upload  # DEMO_BUG=1
-pio run -d firmware/esp32 -e fixed -t upload     # DEMO_BUG=0
-pip install -e '.[pi]'
+pio run -d firmware/esp32 -e esp32dev   # DEMO_BUG=1 build → firmware/esp32/.pio/build/esp32dev/
+pio run -d firmware/esp32 -e fixed      # DEMO_BUG=0 build
+pip install -e '.[pi]'                  # on the Pi: gpiozero, pyserial, smbus2, esptool
 aperture-daemon --backend real --serial-port /dev/serial0 --profile esp32_safety
 ```
 
-Flashing is a separate provisioning step; disconnect the programming USB cable
-before HIL operation and use a safe independent supply. DUT telemetry is emitted
-on ESP32 Serial2 (RX16/TX17), not the USB console. Enable Pi UART, disable its login
-console on `/dev/serial0`, and enable I2C for gyro profiles (`raspi-config`). Avoid
-claiming pins already used by system services/HATs. Pi supply pins must not power
-loads outside the board's ratings. Pi 5 may need a supported gpiozero pin factory.
+### Flashing over the Pi header (no micro-USB)
+
+The laptop never touches the ESP32. `aperture-ui` (sidebar **ESP32 firmware** panel, the
+*Flash fixed firmware* chip, or a prompt such as "flash the fixed firmware") and
+`aperture-agent --flash esp32dev|fixed` read the PlatformIO artifacts
+(`bootloader.bin` @0x1000, `partitions.bin` @0x8000, `boot_app0.bin` @0xE000 when the
+Arduino framework is installed, `firmware.bin` @0x10000), stream them to the daemon in
+48 KiB base64 chunks with SHA-256 manifests (`flash_begin` / `flash_chunk` / `flash_run`),
+and the Pi runs `esptool --before no_reset --after no_reset write_flash` on `/dev/serial0`
+while driving the control pins itself: GPIO24 (BOOT/GPIO0) LOW, GPIO25 (EN) pulsed LOW→HIGH,
+write, then BOOT released and EN pulsed again to boot the new image. Both pins are released
+to the ESP32's own pull-ups afterwards. *Manual boot* skips the GPIO24 wire: hold the BOOT
+button while the console resets the board. The firmware embeds
+`APERTURE_BUILD esp32_safety DEMO_BUG=<0|1>`; the daemon reports it as `build_tag`, and the
+simulated harness switches its planted bug on or off from that tag so the flash → re-verify
+loop can be rehearsed without hardware. Tick *Build with PlatformIO first* to run `pio run`
+from the console (PlatformIO must be installed on the laptop).
+
+UART0 is shared: the same TX0/RX0 wires carry the JSON telemetry at 115200 baud during tests
+and esptool traffic while flashing, so the micro-USB port stays empty (power it from VIN or a
+charger without data). Enable the Pi UART and disable its login console on `/dev/serial0`,
+and enable I2C for gyro profiles (`raspi-config`). Avoid claiming pins already used by system
+services/HATs. Pi supply pins must not power loads outside the board's ratings.
 
 Normal trigger drives GPIO19; duty >80% throttles (actuator LOW). Fault has highest
 priority, and claims both outputs LOW. IDLE and recovery re-arm GPIO21 HIGH.

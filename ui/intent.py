@@ -13,6 +13,10 @@ def interpret(prompt):
     match = re.fullmatch(r"read\s+(?:pin|gpio)\s*(\d+)", text)
     if match:
         return {"cmd": "read", "pins": [int(match[1])]}, "Reading confirmed GPIO input."
+    if "flash" in text or "upload firmware" in text or "program the esp32" in text:
+        env = "fixed" if re.search(r"\bfix(ed)?\b", text) else "esp32dev"
+        return ({"action": "flash", "env": env},
+                f"Flashing the {'fixed' if env == 'fixed' else 'DEMO_BUG'} build over the Pi header UART.")
     for word, profile in (("gyroscope", "mpu6050_gyro"), ("gyro", "mpu6050_gyro"),
                           ("display", "display"), ("esp32", "esp32_safety")):
         if "test" in text and word in text:

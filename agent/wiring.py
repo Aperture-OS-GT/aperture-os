@@ -55,9 +55,10 @@ class Wiring:
         if self.profile is None:
             raise ValueError("select a DUT profile first")
         return [wire["pi_pin"] for wire in self.profile["wires"]
-                if not self.header.gpio(wire["pi_pin"])["connected"] or
+                if not wire.get("optional") and (
+                not self.header.gpio(wire["pi_pin"])["connected"] or
                 self.header.gpio(wire["pi_pin"])["dut_pin"] != wire["dut_pin"] or
-                self.header.gpio(wire["pi_pin"])["direction"] != wire["direction"]]
+                self.header.gpio(wire["pi_pin"])["direction"] != wire["direction"])]
 
     def status(self):
         return {"profile": self.profile, "missing": self.missing(), "ready": not self.missing()}

@@ -11,7 +11,7 @@ dependencies = ["rich>=13"]
 license = {text = "MIT"}
 
 [project.optional-dependencies]
-pi = ["gpiozero>=2", "pyserial>=3.5", "smbus2>=0.4"]
+pi = ["gpiozero>=2", "pyserial>=3.5", "smbus2>=0.4", "esptool>=4.7"]
 llm = ["openai>=1"]
 dev = ["pytest>=8", "ruff>=0.9"]
 

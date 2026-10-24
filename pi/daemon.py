@@ -26,7 +26,8 @@ class Harness:
                 if cmd == "ping":
                     result = {"pong": True}
                 elif cmd in ("list_pins", "configure_pin", "write", "pwm", "read", "sample",
-                             "release", "select_profile"):
+                             "release", "select_profile", "flash_begin", "flash_chunk",
+                             "flash_run"):
                     result = self.generic(command)
                 else:
                     if cmd == "set_pin":
@@ -66,7 +67,15 @@ class Harness:
             backend.select_profile(command["profile"])
             self.header = Header()
             return {"profile": command["profile"]}
-        if cmd == "configure_pin":
+        if cmd == "flash_begin":
+            return backend.flash_begin(command["images"])
+        if cmd == "flash_chunk":
+            return backend.flash_chunk(command["index"], command["data"])
+        if cmd == "flash_run":
+            result = backend.flash_run(command["baud"], command["boot_pin"], command["en_pin"])
+            values = [{"pin": pin, "direction": None, "value": 0}
+                      for pin in (command["boot_pin"], command["en_pin"]) if pin is not None]
+        elif cmd == "configure_pin":
             values = backend.configure(command["pin"], command["direction"],
                                        command.get("pull", "none"))
         elif cmd == "write":
