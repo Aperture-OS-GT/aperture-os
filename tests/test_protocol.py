@@ -111,7 +111,9 @@ def test_cbor_and_chunks_carry_every_op():
             if not required:
                 continue
             args[field] = {"str": "c", "list[int]": [1], "bool": True, "uint": 1, "float": 1.0, "pin": 17,
-                           "mode": "output", "level": 1, "bytes": b"\x00", "list[pin]": [17]}[kind]
+                           "mode": "output", "level": 1, "bytes": b"\x00", "list[pin]": [17],
+                           "b64chunk": "AAAA",
+                           "list[flash_image]": [{"offset": 0x1000, "size": 3, "sha256": "0" * 64}]}[kind]
         if op == "uart.open":
             args["rx"] = 15
         message = validate_request(req(op, **args))
