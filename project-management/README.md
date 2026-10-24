@@ -10,6 +10,7 @@ This folder is the single source of truth for *what* Aperture OS is supposed to 
 | `01-current-state.md` | Gap analysis: what the repo has today vs. the target spec, what is kept/replaced |
 | `02-architecture.md` | Target architecture: packages, transports, protocol v1, request lifecycle, session/plan data formats |
 | `03-roadmap.md` | Delivery order, milestones, PR sequence |
+| `04-spec-review.md` | Issues found while building against this spec, with evidence and proposed resolutions (R-n) |
 | `epics/EPIC-0x-*.md` | One file per epic; each holds its user stories with acceptance criteria |
 | `user-flows/*.md` | End-to-end flows across epics (what the tester/agent actually does, screen by screen) |
 
@@ -34,6 +35,7 @@ This folder is the single source of truth for *what* Aperture OS is supposed to 
 | [EPIC-05](epics/EPIC-05-test-plans.md) | Natural-language test plans | Host | US-38…US-44 | todo |
 | [EPIC-06](epics/EPIC-06-tester-interface.md) | Tester interface | UI | US-45…US-58 | todo |
 | [EPIC-07](epics/EPIC-07-platform-and-devex.md) | Platform, CI, packaging, safety | All | US-59…US-66 | todo |
+| [EPIC-08](epics/EPIC-08-bench-dut-and-hardware-parity.md) | Bench DUT and hardware parity | Firmware/Pi/Host | US-67…US-71 | in-progress |
 
 ## User flows
 
@@ -46,6 +48,10 @@ This folder is the single source of truth for *what* Aperture OS is supposed to 
 | [UF-5 Replay and export a session](user-flows/UF-5-replay-and-export-session.md) | EPIC-04, 06 |
 | [UF-6 Virtual Rig in CI](user-flows/UF-6-virtual-rig-in-ci.md) | EPIC-02, 05, 07 |
 | [UF-7 Disconnect, watchdog and fail-safe](user-flows/UF-7-disconnect-and-fail-safe.md) | EPIC-01, 06 |
+| [UF-8 Set up a Pi bridge and pair a host](user-flows/UF-8-bridge-setup-and-pairing.md) | EPIC-01, 07, 08 |
+| [UF-9 Capture a waveform and assert its timing](user-flows/UF-9-capture-and-timeline-assertion.md) | EPIC-01, 03, 05, 06 |
+| [UF-10 UART, I2C and SPI transactions](user-flows/UF-10-bus-transactions.md) | EPIC-01, 03, 04 |
+| [UF-11 Bench bring-up of the reference test](user-flows/UF-11-bench-bring-up.md) | EPIC-01, 05, 08 |
 
 ## Conventions
 
