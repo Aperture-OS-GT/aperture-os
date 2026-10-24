@@ -7,12 +7,14 @@ name = "aperture-os"
 version = "0.1.0"
 description = "Physical truth verification for embedded firmware"
 requires-python = ">=3.10"
-dependencies = ["rich>=13"]
+dependencies = ["rich>=13", "mcp>=2,<3", "uvicorn>=0.30"]
 license = {text = "MIT"}
 
 [project.optional-dependencies]
 pi = ["gpiozero>=2", "pyserial>=3.5", "smbus2>=0.4", "esptool>=4.7"]
 llm = ["openai>=1"]
+ble = ["bleak>=0.22"]
+bridge = ["bless>=0.2.6", "lgpio>=0.2", "pyserial>=3.5", "spidev>=3.6", "smbus2>=0.4"]
 dev = ["pytest>=8", "ruff>=0.9"]
 
 [project.scripts]
@@ -20,6 +22,8 @@ aperture-daemon = "pi.daemon:main"
 aperture-agent = "agent.main:main"
 aperture-ui = "ui.server:main"
 aperture = "aperture.cli:main"
+aperture-bridge = "pi.bridge.daemon:main"
+aperture-mcp = "aperture.mcp_server:main"
 
 [tool.setuptools.packages.find]
 include = ["aperture*", "pi*", "agent*", "ui*", "profiles*"]

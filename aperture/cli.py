@@ -80,6 +80,40 @@ def cmd_rig_scenarios(args) -> int:
     return 0
 
 
+def cmd_mcp(args) -> int:
+    from .mcp_server import run
+    return run(args, sys.stderr)
+
+
+def cmd_agent(args) -> int:
+    from .agent import RigAgent, openai_available
+    if not openai_available():
+        print("the agent needs the openai package and OPENAI_API_KEY (pip install -e '.[llm]')", file=sys.stderr)
+        return 2
+    if args.mcp:
+        target = args.mcp
+    else:
+        from .mcp_server import RigHost, build_server
+        host = RigHost(home=args.home, actor="agent:openai")
+        host.call("connect", {"transport": args.transport, "scenario": args.scenario, "target": args.target})
+        target = build_server(host)
+    agent = RigAgent(target, model=args.model, max_steps=args.max_steps,
+                     on_step=lambda s: print(f"  {'ok ' if s['ok'] else 'ERR'} {s['tool']} {json.dumps(s['args'])}",
+                                             file=sys.stderr))
+    result = agent.run(args.prompt, save_as=args.save_plan)
+    print(result.reply)
+    if result.saved:
+        print(f"saved plan: {result.saved}")
+    if not args.mcp:
+        host.close()
+    return {True: 0, False: 1}.get(result.verdict, 3)
+
+
+def cmd_bridge(args) -> int:
+    from pi.bridge.daemon import main as bridge_main
+    return bridge_main(args.bridge_args)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aperture", description="Aperture OS hardware-in-the-loop CLI")
     parser.add_argument("--home", help="data directory (default $APERTURE_HOME or ~/.aperture)")
@@ -110,6 +144,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     rig = sub.add_parser("rig").add_subparsers(dest="action", required=True)
     rig.add_parser("scenarios").set_defaults(func=cmd_rig_scenarios)
+
+    from .mcp_server import add_arguments
+    mcp = sub.add_parser("mcp", help="serve the rig tool set over MCP (stdio, or --http PORT)")
+    add_arguments(mcp)
+    mcp.set_defaults(func=cmd_mcp)
+
+    agent = sub.add_parser("agent", help="run a natural-language test with the OpenAI agent via MCP")
+    agent.add_argument("prompt")
+    agent.add_argument("--mcp", help="URL of a running MCP server (default: in-process server)")
+    agent.add_argument("--transport", default="virtual", choices=["virtual", "tcp", "ble"])
+    agent.add_argument("--scenario", default="empty")
+    agent.add_argument("--target")
+    agent.add_argument("--model", help="OpenAI model (default $OPENAI_MODEL or gpt-4o-mini)")
+    agent.add_argument("--max-steps", type=int, default=40)
+    agent.add_argument("--save-plan", metavar="NAME", help="save the passing sequence as a re-runnable plan")
+    agent.set_defaults(func=cmd_agent)
+
+    bridge = sub.add_parser("bridge", help="run the Pi bridge daemon (same as aperture-bridge)", add_help=False)
+    bridge.add_argument("bridge_args", nargs=argparse.REMAINDER)
+    bridge.set_defaults(func=cmd_bridge)
     return parser
 
 

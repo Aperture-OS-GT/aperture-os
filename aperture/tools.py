@@ -15,7 +15,7 @@ from collections.abc import Callable
 from .pins import MODES
 from .protocol import ProtocolError
 from .session import Session
-from .transport.base import Transport, TransportError
+from .transport.base import Transport
 
 EDGES = ("rising", "falling", "any")
 TRANSPORTS = ("virtual", "tcp", "ble")
@@ -477,9 +477,11 @@ def default_transport_factory(kind: str, scenario: str | None = None, target: st
         from .transport.virtual import VirtualTransport
         return VirtualTransport(scenario=scenario or "empty", **kwargs)
     if kind == "tcp":
-        raise TransportError("TCP transport lands with the Pi bridge PR (US-16)")
+        from .transport.tcp import TcpTransport
+        return TcpTransport(target, **kwargs)
     if kind == "ble":
-        raise TransportError("BLE transport lands with the Pi bridge PR (US-15)")
+        from .transport.ble import BleTransport
+        return BleTransport(target, **kwargs)
     raise ToolError("bad_request", f"unknown transport {kind!r}")
 
 
