@@ -308,6 +308,48 @@ class VirtualRig:
         self._emit("control.changed", controller=None, reason="release")
         return {}
 
+    # --- firmware flashing (esptool over the header UART; EN/BOOT driven by the rig) ---
+    def _flasher(self):
+        if getattr(self, "flasher", None) is None:
+            from pi.flash import Flasher
+
+            self.flasher = Flasher(is_real=False)
+        return self.flasher
+
+    def _op_flash_begin(self, r):
+        from pi.flash import MAX_IMAGE_BYTES
+
+        images = r["images"]
+        if not 1 <= len(images) <= 8 or sum(i["size"] for i in images) > MAX_IMAGE_BYTES:
+            raise ProtocolError("bad_request", "images: 1..8 entries within 4 MiB")
+        return self._flasher().begin(images)
+
+    def _op_flash_chunk(self, r):
+        try:
+            return self._flasher().chunk(r["index"], r["data"])
+        except ValueError as exc:
+            raise ProtocolError("bad_request", str(exc)) from None
+
+    def _op_flash_run(self, r):
+        boot_pin, en_pin = r.get("boot_pin"), r["en_pin"]
+        if boot_pin == en_pin:
+            raise ProtocolError("bad_request", "boot_pin and en_pin must differ")
+        for bcm in (boot_pin, en_pin):
+            if bcm is not None:
+                self._pin(bcm)
+        try:
+            result = self._flasher().run(r["baud"], boot_pin, en_pin)
+        except ValueError as exc:
+            raise ProtocolError("io", str(exc)) from None
+        tag = result.get("build_tag") or ""
+        if "DEMO_BUG=" in tag:
+            for behavior in self.behaviors:
+                if hasattr(behavior, "demo_bug"):
+                    behavior.demo_bug = tag.split("DEMO_BUG=", 1)[1][:1] == "1"
+                    behavior.reset()
+        self._emit("rig.warning", msg=f"flashed {tag or 'firmware'} ({result['seconds']} s)")
+        return result
+
     def _op_list_pins(self, r):
         return {"pins": [self.pins[b].snapshot() for b in sorted(self.pins)],
                 "controller": self.controller["client"] if self.controller else None}

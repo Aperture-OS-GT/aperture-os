@@ -181,6 +181,11 @@ aperture-daemon --backend real --serial-port /dev/serial0 --profile esp32_safety
 
 ### Flashing over the Pi header (no micro-USB)
 
+The tester console (`python -m aperture.server`) exposes the same capability as the
+`flash_firmware` tool (RIG panel: build selector, *hold BOOT*, **⚡ Flash**; prompt
+"flash the fixed firmware") via the bridge ops `flash.begin` / `flash.chunk` / `flash.run`.
+On the Virtual Rig the flashed build tag switches the scripted DUT's `demo_bug`.
+
 The laptop never touches the ESP32. `aperture-ui` (sidebar **ESP32 firmware** panel, the
 *Flash fixed firmware* chip, or a prompt such as "flash the fixed firmware") and
 `aperture-agent --flash esp32dev|fixed` read the PlatformIO artifacts

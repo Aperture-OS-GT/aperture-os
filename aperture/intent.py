@@ -23,6 +23,12 @@ def interpret(text: str, state: dict | None = None) -> dict:
     behaviors = {b.get("name"): b for b in (state or {}).get("behaviors", [])}
     if TEST_WORDS.search(low) and not low.startswith(("read", "what", "show")):
         return {"kind": "plan", "reply": "Compiled your test into a plan."}
+    if re.search(r"\b(flash|reflash|upload firmware|program the esp32)\b", low):
+        env = "fixed" if re.search(r"\bfix(ed)?\b", low) else "esp32dev"
+        manual = bool(re.search(r"\b(manual|hold|no boot wire)\b", low))
+        return {"kind": "tools", "calls": [{"tool": "flash_firmware", "args": {"env": env, "manual_boot": manual}}],
+                "reply": lambda r: f"Flashed {env}: {r[0]['result'].get('build_tag') or 'done'}." if r[0]["ok"]
+                else f"Flash failed: {r[0]['error']['msg']}"}
     if re.search(r"\b(reset|reboot|power.?cycle)\b", low):
         return {"kind": "tools", "calls": [{"tool": "dut_action", "args": {"behavior": "dut", "action": "reset"}}],
                 "reply": "Reset the DUT."}

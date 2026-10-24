@@ -104,6 +104,11 @@ SPECS: dict[str, dict] = {
                                     "name": _p("string", "Assertion name", False)}},
     "release_all": {"description": "Return every output to high-impedance, stop PWM, close buses.", "params": {}},
     "note": {"description": "Record a note in the session log.", "params": {"text": _p("string", "Note text")}},
+    "flash_firmware": {"description": "Flash the ESP32 safety firmware over the rig's header UART0 (GPIO14 TXD->RX0, "
+                                      "GPIO15 RXD<-TX0) with the rig driving EN (GPIO25) and BOOT/GPIO0 (GPIO24). "
+                                      "esp32dev carries the planted bug, fixed does not. Wiring must be confirmed.",
+                       "params": {"env": _p("string", "PlatformIO env", enum=["esp32dev", "fixed"]),
+                                  "manual_boot": _p("boolean", "No BOOT wire: the human holds BOOT", required=False)}},
     "dut_action": {"description": "Virtual Rig only: act on a behavior (e.g. press/release/click a button, reset).",
                    "params": {"behavior": _p("string", "Behavior name, or 'dut' for reset"),
                               "action": _p("string", "press, release, click, reset"),
@@ -449,6 +454,30 @@ class Tools:
     def note(self, text: str) -> dict:
         self.session.note(text, "agent")
         return {"ok": True}
+
+    def flash_firmware(self, env: str, manual_boot: bool = False) -> dict:
+        import base64
+
+        from agent.flash import CHUNK_BYTES, FLASH_PINS, images, manifest, simulated_images
+
+        pins = [FLASH_PINS["tx"], FLASH_PINS["rx"], FLASH_PINS["en"]] + ([] if manual_boot else [FLASH_PINS["boot"]])
+        self._gate(*pins)
+        virtual = getattr(self.session.transport, "rig", None) is not None
+        try:
+            payload = images(env)
+        except ValueError as exc:
+            if not virtual:
+                raise ToolError("io", str(exc)) from None
+            payload = simulated_images(env)  # rehearse on the Virtual Rig without a PlatformIO build
+        self._req("flash.begin", images=manifest(payload))
+        for index, image in enumerate(payload):
+            for start in range(0, len(image["data"]), CHUNK_BYTES):
+                self._req("flash.chunk", index=index,
+                          data=base64.b64encode(image["data"][start:start + CHUNK_BYTES]).decode())
+        request = self._req("flash.run", baud=460800, en_pin=FLASH_PINS["en"],
+                            **({} if manual_boot else {"boot_pin": FLASH_PINS["boot"]}))
+        self.session.note(f"flashed {env}: {request.result.get('build_tag') or 'no build tag'}", "agent")
+        return self._result(request, env=env, simulated=virtual and not request.result.get("log", "").startswith("esptool"))
 
     def dut_action(self, behavior: str, action: str, ms: int | None = None) -> dict:
         rig = getattr(self.session.transport, "rig", None)

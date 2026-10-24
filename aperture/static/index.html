@@ -49,6 +49,11 @@
         <button id="btn-release">Release all</button>
         <button id="btn-newsession">New session</button>
       </div>
+      <div class="row">
+        <select id="flash-env" title="ESP32 firmware build"><option value="esp32dev">ESP32 fw: DEMO_BUG</option><option value="fixed">ESP32 fw: fixed</option></select>
+        <label class="muted"><input type="checkbox" id="flash-manual"> hold BOOT</label>
+        <button id="btn-flash" title="Flash over GPIO14/15 UART with EN (GPIO25) and BOOT (GPIO24)">⚡ Flash</button>
+      </div>
       <div id="behaviors" class="chips"></div>
     </section>
 
