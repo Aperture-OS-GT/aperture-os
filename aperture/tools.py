@@ -98,6 +98,11 @@ SPECS: dict[str, dict] = {
                                   "component": _p("string", "What it connects to"),
                                   "reason": _p("string", "Why the test needs it"),
                                   "dir": _p("string", "out = rig drives, in = rig observes", enum=["in", "out"])}},
+    "assert_frequency": {"description": "Assert the last capture shows a square wave of the given frequency on a pin.",
+                         "params": {"pin": PIN, "hz": _p("number", "Expected frequency"),
+                                    "tolerance_hz": _p("number", "Allowed error in Hz"),
+                                    "name": _p("string", "Assertion name", False)}},
+    "release_all": {"description": "Return every output to high-impedance, stop PWM, close buses.", "params": {}},
     "note": {"description": "Record a note in the session log.", "params": {"text": _p("string", "Note text")}},
     "dut_action": {"description": "Virtual Rig only: act on a behavior (e.g. press/release/click a button, reset).",
                    "params": {"behavior": _p("string", "Behavior name, or 'dut' for reset"),
@@ -419,6 +424,22 @@ class Tools:
         detail = {"matched": matched, "missing": missing, "extra": extra, "tolerance_us": tolerance_us}
         self.session.assertion(name or "timeline", passed, edges, capture["edges"], "agent", **detail)
         return {"pass": passed, **detail}
+
+    def assert_frequency(self, pin: int, hz: float, tolerance_hz: float, name: str | None = None) -> dict:
+        capture = self.last_capture
+        if capture is None or pin not in capture["pins"]:
+            raise ToolError("bad_request", f"no capture of GPIO{pin}; run capture first")
+        rising = [e for e in capture["edges"] if e[1] == pin and e[2] == 1]
+        measured = (len(rising) - 1) / ((rising[-1][0] - rising[0][0]) / 1e6) if len(rising) >= 2 else 0.0
+        passed = abs(measured - hz) <= tolerance_hz
+        self.session.assertion(name or f"GPIO{pin} ~ {hz} Hz", passed, hz, round(measured, 3), "agent", pin=pin,
+                               tolerance_hz=tolerance_hz, rising_edges=len(rising))
+        return {"pass": passed, "expected_hz": hz, "measured_hz": round(measured, 3), "rising_edges": len(rising)}
+
+    def release_all(self) -> dict:
+        self.last_capture = None
+        self._rx.clear()
+        return self._result(self._req("release_all"))
 
     # --- human / misc -----------------------------------------------------------------------
     def request_wiring(self, pin: int, dut_pin: str, component: str, reason: str, dir: str) -> dict:
