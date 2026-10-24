@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import struct
 from typing import Any
 
@@ -54,10 +55,13 @@ OPS: dict[str, dict[str, tuple]] = {
     "stream.set": {"pins": ("list[pin]", True), "on": ("bool", True)},
     "list_pins": {},
     "release_all": {},
+    "flash.begin": {"images": ("list[flash_image]", True)},
+    "flash.chunk": {"index": ("uint", True), "data": ("b64chunk", True)},
+    "flash.run": {"baud": ("uint", True), "boot_pin": ("pin", False), "en_pin": ("pin", True)},
 }
 DRIVING_OPS = frozenset({"pin.mode", "pin.write", "pin.pulse", "pin.pwm", "uart.open", "uart.close",
                          "uart.write", "spi.xfer", "i2c.write", "capture.start", "capture.cancel",
-                         "release_all"})
+                         "release_all", "flash.begin", "flash.chunk", "flash.run"})
 EVENTS = ("pin.change", "uart.rx", "capture.done", "control.changed", "control.lost", "stream.overflow",
           "rig.warning")
 
@@ -95,6 +99,15 @@ def _check(name: str, value: Any, kind: str) -> Any:
     elif kind == "mode":
         if value not in MODES:
             raise ProtocolError("bad_request", f"{name}: mode must be one of {', '.join(MODES)}")
+    elif kind == "b64chunk":
+        if not isinstance(value, str) or not 0 < len(value) <= 49152:
+            raise ProtocolError("bad_request", f"{name}: base64 text up to 48 KiB")
+    elif kind == "flash_image":
+        if (not isinstance(value, dict) or set(value) != {"offset", "size", "sha256"} or
+                type(value["offset"]) is not int or not 0 <= value["offset"] < 4 * 1024 * 1024 or
+                type(value["size"]) is not int or not 1 <= value["size"] <= 4 * 1024 * 1024 or
+                not isinstance(value["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["sha256"])):
+            raise ProtocolError("bad_request", f"{name}: expected {{offset,size,sha256}} within 4 MiB")
     elif kind.startswith("list["):
         inner = kind[5:-1]
         if not isinstance(value, list) or not value or len(value) > 64:

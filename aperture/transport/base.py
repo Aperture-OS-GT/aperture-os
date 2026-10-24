@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 
 from ..protocol import ProtocolError
 
-DEFAULT_TIMEOUTS = {"ack": 1.0, "response": 5.0, "pin.pulse": 7.0, "uart.read": 30.0, "capture.start": 5.0}
+DEFAULT_TIMEOUTS = {"ack": 1.0, "response": 5.0, "pin.pulse": 7.0, "uart.read": 30.0, "capture.start": 5.0,
+                    "flash.run": 300.0}
 
 
 class TransportError(Exception):

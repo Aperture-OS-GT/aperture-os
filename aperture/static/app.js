@@ -179,6 +179,7 @@
   $("#btn-disconnect").onclick = async () => applyState(await api("/api/disconnect", {}));
   $("#btn-control").onclick = () => tool(S.state.connection.controller ? "release_control" : "take_control", {});
   $("#btn-release").onclick = () => tool("release_all", {});
+  $("#btn-flash").onclick = async () => { const r = await tool("flash_firmware", { env: $("#flash-env").value, manual_boot: $("#flash-manual").checked }); if (r?.ok) toast(`Flashed ${r.result.env}: ${r.result.build_tag || "done"}`); };
   $("#btn-newsession").onclick = async () => { resetLog(); applyState(await api("/api/session/new", {})); loadSessions(); };
   $("#transport").onchange = () => { const v = $("#transport").value; $("#scenario").hidden = v !== "virtual"; $("#target").hidden = v === "virtual"; };
   $("#insp-apply").onclick = () => { const mode = $("#insp-mode").value; tool("set_mode", mode === "output" ? { pin: S.selected, mode, initial: 0 } : { pin: S.selected, mode }); };
