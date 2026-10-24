@@ -49,7 +49,7 @@
     const obs = r.stages.observed; let detail = "";
     if (obs && obs.level != null) detail = ` → level ${obs.level}${r.mismatch ? " (MISMATCH)" : ""}`;
     if (r.stages.executed && r.stages.executed.msg) detail = ` — ${r.stages.executed.msg}`;
-    return `<span class="who">${r.actor}</span><code>${r.op}</code> <span class="mono muted">${args}</span>${stages}<span class="mono">${detail}</span>`;
+    return `<span class="who">${r.actor}</span><code>${r.op}</code>${r.count ? ` <span class="st">×${r.count}</span>` : ""} <span class="mono muted">${args}</span>${stages}<span class="mono">${detail}</span>`;
   };
   const renderEvent = (e) => {
     switch (e.kind) {
@@ -82,19 +82,29 @@
     const r = reduce(e);
     const cls = classify(e);
     if (r) {
+      // collapse back-to-back identical polls (uart.read / pin.read loops) into one row with a counter
+      if (!r.el && e.stage === "requested" && S.lastReq && S.lastReq.id !== r.id && S.lastReq.op === e.op && ["uart.read", "pin.read"].includes(e.op)
+          && JSON.stringify(S.lastReq.args) === JSON.stringify(e.args) && S.lastReq.stages.observed) { r.el = S.lastReq.el; r.count = (S.lastReq.count || 1) + 1; }
+      if (e.stage === "requested") { S.lastReq = r; if (!["uart.read", "pin.read"].includes(e.op)) S.lastBus = null; }
       if (!r.el) { r.el = document.createElement("div"); r.el.className = `ev ${cls}`; r.el.innerHTML = `<div class="t">${fmtT(e.t_host_us, S.t0)}</div><div class="body"></div>`; log.appendChild(r.el); }
       r.el.querySelector(".body").innerHTML = renderRequest(r);
       r.el.classList.toggle("bad", !!r.err); r.el.hidden = !visible(e, cls);
     } else {
+      if (e.kind !== "pin.change" && e.kind !== "bus.bytes") { S.lastReq = null; S.lastBus = null; }
+      const last = S.lastBus;
+      if (e.kind === "bus.bytes" && last && last._ev.bus === e.bus && last._ev.dir === e.dir && last._ev.port === e.port) {
+        const pre = last.querySelector("pre"); pre.textContent += e.text ?? e.hex ?? ""; last._ev = { ...last._ev, text: pre.textContent }; return;
+      }
       const el = document.createElement("div"); el.className = `ev ${cls}${e.kind === "assertion" && !e.pass ? " bad" : ""}`;
       el.dataset.kind = e.kind; el.innerHTML = `<div class="t">${fmtT(e.t_host_us, S.t0)}</div><div class="body">${renderEvent(e)}</div>`;
       el.hidden = !visible(e, cls); el._ev = e; log.appendChild(el);
+      if (e.kind === "bus.bytes") S.lastBus = el;
     }
     if (e.kind === "pin.change" && e.pin === S.selected) renderInspector();
     const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
     if (nearBottom) log.scrollTop = log.scrollHeight;
   };
-  const resetLog = () => { log.innerHTML = ""; S.events = []; S.t0 = null; S.reqs = {}; S.pinHistory = {}; };
+  const resetLog = () => { log.innerHTML = ""; S.events = []; S.t0 = null; S.reqs = {}; S.pinHistory = {}; S.lastReq = null; S.lastBus = null; };
   const refilter = () => { for (const el of log.children) { const e = el._ev || Object.values(S.reqs).find((r) => r.el === el)?.stages.requested; if (e) el.hidden = !visible(e, [...el.classList].find((c) => S.filters.has(c) || ["agent", "tester", "bridge", "pin", "bus", "assert"].includes(c))); } };
 
   // ---------- state / rig panel ----------
