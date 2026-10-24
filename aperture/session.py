@@ -6,6 +6,7 @@ and never need a transport.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import secrets
@@ -58,6 +59,7 @@ class Session:
         self._seq = 0
         self._req_n = 0
         self._pending: Request | None = None
+        self._keepalive_gen = 0  # bumped to retire the running keepalive thread
         self._lock = threading.RLock()
         self._cond = threading.Condition(self._lock)
         self._listeners: list[Callable[[dict], None]] = []
@@ -138,6 +140,25 @@ class Session:
             self.record("session.end", "system", reason=reason)
             self.end(reason)
 
+    def _start_keepalive(self, watchdog_s: float | None) -> None:
+        self._keepalive_gen += 1
+        interval = max(0.25, (watchdog_s or 3.0) / 3)
+        threading.Thread(target=self._keepalive, args=(self._keepalive_gen, interval),
+                         name=f"keepalive-{self.id}", daemon=True).start()
+
+    def _keepalive(self, gen: int, interval: float) -> None:
+        """Ping while we hold control, so the bridge watchdog only fires once this host is gone. Each ping runs
+        under the session lock like a request (same lock order, never overlaps one, so it is never logged)."""
+        while True:
+            time.sleep(interval)
+            with self._lock:
+                transport = self.transport
+                if gen != self._keepalive_gen or not (transport and transport.connected and transport.control_token):
+                    return
+                # a failed ping surfaces on the next real request; a control.lost event clears the token
+                with contextlib.suppress(TransportError, ProtocolError, OSError):
+                    transport.request("ping")
+
     def _on_ack(self, request_id: int, t_bridge_us: int) -> None:
         with self._lock:
             request = self._pending
@@ -179,6 +200,8 @@ class Session:
                 response = Response(-1, False, 0, {}, "timeout" if "timeout" in str(exc).lower() else "io", str(exc))
             finally:
                 self._pending = None
+            if op == "control.take" and response.ok:
+                self._start_keepalive(response.result.get("watchdog_s"))
             if "acknowledged" not in request.stages:
                 request.advance("executed", t_host_us=self.now_us(), ack="implicit", ok=response.ok,
                                 err=response.err, result=response.result, t_bridge_us=response.t_bridge_us)

@@ -10,20 +10,16 @@
 <body>
 <header class="topbar">
   <div class="brand"><span class="logo"></span>Aperture OS <span class="muted" id="version"></span></div>
-  <div class="topbar-right">
-    <span class="pill" id="replay-pill" hidden>REPLAY <button id="replay-exit" class="link">exit</button></span>
-    <span class="pill" id="clock"></span>
-  </div>
-</header>
 
-<main class="layout">
-  <!-- LEFT: rig panel + sessions -->
-  <aside class="col col-left">
-    <section class="card" id="rig">
-      <div class="card-head">
-        <h2>Rig</h2>
-        <span class="status" id="conn-status"><i class="dot"></i><span>Disconnected</span></span>
-      </div>
+  <!-- CENTER: rig status pill; click to pop open the rig panel -->
+  <div class="menu rig-menu">
+    <button class="rig-pill pop-toggle" id="rig-toggle" aria-expanded="false" aria-controls="rig" title="Rig: connect, switch rigs, take control">
+      <span class="rig-label">Rig</span>
+      <span class="status" id="conn-status"><i class="dot"></i><span>Disconnected</span></span>
+      <svg class="caret" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <section class="popover" id="rig" aria-label="Rig connection" hidden>
+      <div class="card-head"><h2>Rig</h2><span class="muted">connection &amp; control</span></div>
       <dl class="kv" id="rig-info">
         <dt>Bridge</dt><dd id="rig-bridge">—</dd>
         <dt>Firmware</dt><dd id="rig-fw">—</dd>
@@ -32,26 +28,46 @@
         <dt>Control</dt><dd id="rig-control">—</dd>
       </dl>
       <div class="row">
-        <select id="transport">
+        <select id="transport" aria-label="Transport">
           <option value="virtual">Virtual Rig</option>
           <option value="tcp">Pi bridge (TCP)</option>
           <option value="ble">Pi bridge (BLE)</option>
         </select>
-        <select id="scenario"></select>
-        <input id="target" placeholder="host:port or BLE name" hidden>
+        <select id="scenario" aria-label="Scenario"></select>
+        <input id="target" placeholder="host:port or BLE name" aria-label="Target" hidden>
       </div>
       <div class="row btns">
         <button id="btn-connect" class="primary">Connect</button>
         <button id="btn-disconnect">Disconnect</button>
-        <button id="btn-control">Take control</button>
       </div>
       <div class="row btns">
+        <button id="btn-control">Take control</button>
         <button id="btn-release">Release all</button>
-        <button id="btn-newsession">New session</button>
       </div>
-      <div id="behaviors" class="chips"></div>
+      <div class="pop-section"><div class="pop-label">Simulated DUT</div><div id="behaviors" class="chips"></div></div>
     </section>
+  </div>
 
+  <div class="topbar-right">
+    <span class="pill" id="replay-pill" hidden>REPLAY <button id="replay-exit" class="link">exit</button></span>
+    <span class="session-tag" title="Current session"><span class="muted">Session</span><span class="mono" id="session-id"></span><span class="verdict" id="verdict"></span></span>
+    <button id="btn-newsession" class="ghost">New session</button>
+    <div class="menu">
+      <button class="ghost pop-toggle" id="export-toggle" aria-expanded="false" aria-controls="export-menu">Export
+        <svg class="caret" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="popover popover-end menu-list" id="export-menu" hidden>
+        <a id="export-json" download>Session JSON <span class="muted">every event, for scripts</span></a>
+        <a id="export-md" download>Report <span class="muted">Markdown summary</span></a>
+      </div>
+    </div>
+    <span class="pill" id="clock"></span>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- LEFT: sessions + plans -->
+  <aside class="col col-left">
     <section class="card grow" id="sessions">
       <div class="card-head"><h2>Sessions</h2><button id="sessions-refresh" class="link">refresh</button></div>
       <ul class="list" id="session-list"></ul>
@@ -63,21 +79,45 @@
     </section>
   </aside>
 
-  <!-- CENTER: current session -->
+  <!-- CENTER: device under test + current session -->
   <section class="col col-center">
-    <div class="card grow" id="session">
+    <section class="card dut" id="dut">
       <div class="card-head">
-        <h2>Session <span class="mono muted" id="session-id"></span> <span class="verdict" id="verdict"></span></h2>
-        <div class="filters" id="filters">
-          <label><input type="checkbox" data-f="agent" checked> agent</label>
-          <label><input type="checkbox" data-f="tester" checked> tester</label>
-          <label><input type="checkbox" data-f="bridge" checked> bridge</label>
-          <label><input type="checkbox" data-f="pin" checked> pins</label>
-          <label><input type="checkbox" data-f="bus" checked> bus</label>
-          <label><input type="checkbox" data-f="assert" checked> asserts</label>
-          <input id="search" placeholder="filter…">
-          <a id="export-json" class="link" download>JSON</a>
-          <a id="export-md" class="link" download>Report</a>
+        <h2>DUT <span class="muted">ESP32 DevKit · LCD · status LED</span></h2>
+        <div class="row"><span class="verdict" id="dut-verdict"></span><button id="dut-wire" title="You confirm the bench wiring shown below (G14/15/17/18/22/23/24/25/27) so tests and UART commands may use those pins">Confirm bench wiring</button><button id="dut-test" class="primary" title="Runs the ESP32 safety plan: drives G17/G18/G27, checks D19/D21 on G22/G23 and BOOT OK over UART">Run demo test</button></div>
+      </div>
+      <div class="dut-body">
+        <div class="esp32" aria-label="ESP32 wiring to the Pi header">
+          <b>ESP32</b>
+          <span>D4 <i>◂ G17</i></span><span>RX0 <i>◂ G14 TXD</i></span>
+          <span>D5 <i>◂ G18</i></span><span>TX0 <i>▸ G15 RXD</i></span>
+          <span>D18 <i>◂ G27</i></span><span>EN <i>◂ G25</i></span>
+          <span>D19 <i>▸ G22</i></span><span>BOOT <i>◂ G24</i></span>
+          <span>D21 <i>▸ G23</i></span><span>VIN <i>◂ 5V pin 2</i></span>
+          <span>D13 <i>▸ LED</i></span><span>GND <i>— GND pin 6</i></span>
+        </div>
+        <div class="dut-io">
+          <div class="lcd" id="lcd" aria-label="LCD preview"><div id="lcd-1"></div><div id="lcd-2"></div></div>
+          <div class="led-row"><span class="led off" id="led"></span><span>Status LED · D13</span><span class="muted mono" id="led-mode">off (no rig)</span></div>
+          <div class="row dut-ctl">
+            <input id="lcd-a" maxlength="16" placeholder="LCD line 1" aria-label="LCD line 1"><input id="lcd-b" maxlength="16" placeholder="LCD line 2" aria-label="LCD line 2"><button id="lcd-send">Send</button>
+          </div>
+          <div class="row btns dut-ctl"><button data-led="LED BLINK 2">Blink 2 Hz</button><button data-led="LED ON">LED on</button><button data-led="LED OFF">LED off</button></div>
+        </div>
+      </div>
+    </section>
+    <div class="card grow" id="session">
+      <div class="card-head log-head">
+        <h2>Session log</h2>
+        <label class="search"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m10.5 10.5 3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><input id="search" type="search" placeholder="Search log" aria-label="Search log" autocomplete="off"></label>
+        <div class="filters" id="filters" role="group" aria-label="Show in log">
+          <span class="filters-label">Show</span>
+          <button type="button" class="fchip agent" data-f="agent" aria-pressed="true" title="Requests and messages from the AI agent">agent</button>
+          <button type="button" class="fchip tester" data-f="tester" aria-pressed="true" title="Actions you took from this console">tester</button>
+          <button type="button" class="fchip bridge" data-f="bridge" aria-pressed="true" title="Bridge, connection and system events">bridge</button>
+          <button type="button" class="fchip pin" data-f="pin" aria-pressed="true" title="GPIO level changes">pins</button>
+          <button type="button" class="fchip bus" data-f="bus" aria-pressed="true" title="UART / I²C / SPI bytes">bus</button>
+          <button type="button" class="fchip assert" data-f="assert" aria-pressed="true" title="Plan steps and pass/fail checks">asserts</button>
         </div>
       </div>
       <div class="log" id="log"></div>

@@ -78,7 +78,33 @@
   const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const visible = (e, cls) => S.filters.has(cls) && (!S.search || JSON.stringify(e).toLowerCase().includes(S.search));
 
+  // ---------- DUT model: LCD text + status LED, followed from UART traffic ----------
+  const DUT = { lcd: ["", ""], led: { mode: "blink", hz: 2 }, tx: "", rx: "" };
+  const renderDut = () => {
+    $("#lcd-1").textContent = DUT.lcd[0].slice(0, 16); $("#lcd-2").textContent = DUT.lcd[1].slice(0, 16);
+    const live = !!S.state?.connection.connected, led = $("#led");
+    led.className = `led ${live ? DUT.led.mode : "off"}`; led.style.setProperty("--period", `${1 / (DUT.led.hz || 2)}s`);
+    $("#led-mode").textContent = !live ? "off (no rig)" : DUT.led.mode === "blink" ? `blinking ${DUT.led.hz} Hz` : DUT.led.mode;
+  };
+  const dutLine = (dir, line) => {
+    const t = line.trim(); let m;
+    if (dir === "tx" && (m = t.match(/^LCD (.*?)\|(.*)$/))) DUT.lcd = [m[1], m[2]];
+    else if (dir === "tx" && (m = t.match(/^LED BLINK ([\d.]+)/i))) DUT.led = { mode: "blink", hz: +m[1] || 2 };
+    else if (dir === "tx" && /^LED ON\b/i.test(t)) DUT.led = { ...DUT.led, mode: "on" };
+    else if (dir === "tx" && /^LED OFF\b/i.test(t)) DUT.led = { ...DUT.led, mode: "off" };
+    // boot defaults only until we've commanded it (the virtual DUT re-announces BOOT OK whenever UART is reopened)
+    else if (dir === "rx" && /BOOT OK/.test(t)) { if (DUT.commanded) return; DUT.lcd = ["BOOT OK", ""]; DUT.led = { mode: "blink", hz: 2 }; }
+    else return;
+    if (dir === "tx") DUT.commanded = true;
+    renderDut();
+  };
+  const dutBytes = (e) => {
+    const k = e.dir === "tx" ? "tx" : "rx"; const lines = (DUT[k] + (e.text ?? "")).split(/\r?\n/); DUT[k] = lines.pop();
+    lines.forEach((l) => dutLine(k, l)); if (k === "rx" && /BOOT OK/.test(DUT[k])) { dutLine("rx", DUT[k]); DUT[k] = ""; }
+  };
+
   const appendEvent = (e) => {
+    if (e.kind === "bus.bytes") dutBytes(e);
     const r = reduce(e);
     const cls = classify(e);
     if (r) {
@@ -131,15 +157,19 @@
     }
     const scen = $("#scenario"); if (!scen.options.length) for (const s of st.scenarios) { const o = document.createElement("option"); o.value = s.name; o.textContent = s.title || s.name; o.title = s.description; scen.appendChild(o); }
     $("#replay-pill").hidden = !st.replay; $("#replay-bar").hidden = !st.replay; $("#composer").hidden = !!st.replay;
-    renderHeader(); renderInspector();
+    if (!c.connected) { S.uartPort = null; DUT.commanded = false; }
+    renderHeader(); renderInspector(); renderDut();
   };
   const refresh = async () => applyState(await api("/api/state"));
 
   // ---------- header SVG ----------
   const PITCH = 2.54 * 9.5; // to scale: 2.54 mm pitch rendered at 9.5 px/mm
+  // bench wiring Pi -> ESP32 DUT (out = Pi drives it); keyed by BCM, power/ground by physical pin
+  const WIRES = { 17: ["D4", 1], 18: ["D5", 1], 27: ["D18", 1], 22: ["D19", 0], 23: ["D21", 0], 14: ["RX0", 1], 15: ["TX0", 0], 25: ["EN", 1], 24: ["BOOT", 1] };
+  const PHYS_WIRES = { 2: ["VIN", 1], 6: ["GND", 1] };
   const renderHeader = () => {
     const svg = $("#header-svg"); const flat = S.state?.header || []; if (!flat.length) return;
-    const pins = S.state?.pins || {}; const w = 120, pad = 14; svg.setAttribute("viewBox", `0 0 ${w} ${pad * 2 + PITCH * 20}`);
+    const pins = S.state?.pins || {}; const w = 190, pad = 14; svg.setAttribute("viewBox", `0 0 ${w} ${pad * 2 + PITCH * 20}`);
     let out = `<rect x="${w / 2 - PITCH - 8}" y="${pad - 10}" width="${PITCH * 2 + 16}" height="${PITCH * 20 + 4}" rx="4" fill="#efeee8" stroke="#cfcdc5" pointer-events="none"/>`;
     for (const p of flat) {
       const col = (p.phys - 1) % 2, row = Math.floor((p.phys - 1) / 2);
@@ -150,7 +180,9 @@
       if (gpio != null && gpio === S.selected) cls += " sel";
       const label = gpio != null ? `G${gpio}` : p.kind === "gnd" ? "GND" : p.kind === "reserved" ? "ID" : p.kind.toUpperCase();
       const tx = col ? cx + PITCH / 2 + 6 : cx - PITCH / 2 - 6, anchor = col ? "start" : "end";
-      out += `<g class="${cls}" data-gpio="${gpio ?? ""}" data-phys="${p.phys}"><circle cx="${cx}" cy="${cy}" r="${PITCH * 0.36}"/><text x="${cx}" y="${cy + 2.5}" text-anchor="middle" class="in">${p.phys}</text><text x="${tx}" y="${cy + 2.5}" text-anchor="${anchor}">${label}${p.alt ? "·" + p.alt : ""}</text></g>`;
+      const wire = gpio != null ? WIRES[gpio] : PHYS_WIRES[p.phys]; let text = `${label}${p.alt ? "·" + p.alt : ""}`;
+      if (wire) text = col ? `${text}<tspan class="wire"> ${wire[1] ? "▸" : "◂"} ${wire[0]}</tspan>` : `<tspan class="wire">${wire[0]} ${wire[1] ? "◂" : "▸"} </tspan>${text}`;
+      out += `<g class="${cls}" data-gpio="${gpio ?? ""}" data-phys="${p.phys}"><circle cx="${cx}" cy="${cy}" r="${PITCH * 0.36}"/><text x="${cx}" y="${cy + 2.5}" text-anchor="middle" class="in">${p.phys}</text><text x="${tx}" y="${cy + 2.5}" text-anchor="${anchor}">${text}</text></g>`;
     }
     svg.innerHTML = out;
     svg.querySelectorAll(".pin-g").forEach((g) => { if (g.dataset.gpio !== "") g.onclick = () => { S.selected = +g.dataset.gpio; renderHeader(); renderInspector(); }; });
@@ -175,7 +207,16 @@
 
   // ---------- actions ----------
   const tool = async (name, args) => { try { const r = await api("/api/tool", { tool: name, args, actor: "tester" }); if (!r.ok) toast(`${name}: ${r.error.msg}`); await refresh(); return r; } catch (e) { toast(e.message); } };
-  $("#btn-connect").onclick = async () => { const kind = $("#transport").value; try { applyState(await api("/api/connect", { transport: kind, scenario: $("#scenario").value, target: $("#target").value || null })); loadSessions(); } catch (e) { toast(e.message); } };
+  $("#btn-connect").onclick = async () => {
+    const body = { transport: $("#transport").value, scenario: $("#scenario").value, target: $("#target").value || null };
+    try { applyState(await api("/api/connect", body)); }
+    catch (e) {
+      // a session that was connected once can't reconnect: start a fresh session and retry
+      if (!/new session/.test(e.message)) { toast(e.message); return; }
+      try { resetLog(); await api("/api/session/new", {}); applyState(await api("/api/connect", body)); } catch (e2) { toast(e2.message); }
+    }
+    loadSessions();
+  };
   $("#btn-disconnect").onclick = async () => applyState(await api("/api/disconnect", {}));
   $("#btn-control").onclick = () => tool(S.state.connection.controller ? "release_control" : "take_control", {});
   $("#btn-release").onclick = () => tool("release_all", {});
@@ -190,7 +231,7 @@
     catch (e) { toast(e.message); }
   };
   log.addEventListener("click", (ev) => { const b = ev.target.closest("[data-wire]"); if (b) wiring(+b.dataset.wire, b.dataset.ok === "1"); });
-  $("#filters").addEventListener("change", (ev) => { const f = ev.target.dataset.f; if (!f) return; ev.target.checked ? S.filters.add(f) : S.filters.delete(f); refilter(); });
+  $("#filters").addEventListener("click", (ev) => { const chip = ev.target.closest("[data-f]"); if (!chip) return; const f = chip.dataset.f, on = !S.filters.has(f); on ? S.filters.add(f) : S.filters.delete(f); chip.setAttribute("aria-pressed", String(on)); refilter(); });
   $("#search").oninput = (ev) => { S.search = ev.target.value.toLowerCase(); refilter(); };
   $("#composer").onsubmit = async (ev) => {
     ev.preventDefault(); const text = $("#prompt").value.trim(); if (!text) return; $("#prompt").value = "";
@@ -205,14 +246,58 @@
     const wrap = document.createElement("div"); wrap.className = "ev agent"; wrap.innerHTML = `<div class="t"></div><div class="body"></div>`; wrap.querySelector(".body").appendChild(node); log.appendChild(wrap); log.scrollTop = log.scrollHeight;
   };
 
+  // ---------- navbar popovers (rig panel, export menu) ----------
+  const popovers = [...document.querySelectorAll(".pop-toggle")].map((btn) => ({ btn, pop: document.getElementById(btn.getAttribute("aria-controls")) }));
+  const setOpen = (p, open) => { p.pop.hidden = !open; p.btn.setAttribute("aria-expanded", String(open)); };
+  for (const p of popovers) {
+    p.btn.onclick = () => { const open = p.pop.hidden; popovers.forEach((q) => setOpen(q, q === p && open)); };
+    p.btn.parentElement.addEventListener("focusout", (ev) => { if (ev.relatedTarget && !p.btn.parentElement.contains(ev.relatedTarget)) setOpen(p, false); });
+  }
+  // composedPath() is captured at dispatch, so clicks on controls that re-render (behavior chips) still count as inside
+  document.addEventListener("click", (ev) => { const path = ev.composedPath(); for (const p of popovers) if (!path.includes(p.pop) && !path.includes(p.btn)) setOpen(p, false); });
+  document.addEventListener("keydown", (ev) => { const p = popovers.find((q) => !q.pop.hidden); if (ev.key === "Escape" && p) { setOpen(p, false); p.btn.focus(); } });
+  $("#export-menu").addEventListener("click", (ev) => { if (ev.target.closest("a")) popovers.forEach((p) => setOpen(p, false)); });
+
   // ---------- sessions & plans lists ----------
+  const fmtWhen = (iso) => {
+    const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso;
+    const day = d.toDateString() === new Date().toDateString() ? "Today" : d.toLocaleDateString([], { month: "short", day: "numeric" });
+    return `${day} · ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}`;
+  };
   const loadSessions = async () => {
     const { sessions, current } = await api("/api/sessions"); const ul = $("#session-list"); ul.innerHTML = "";
     for (const s of sessions) {
-      const li = document.createElement("li"); if (s.id === current) li.classList.add("current");
-      li.innerHTML = `<div><div>${s.created_at.replace("T", " ")}</div><div class="meta">${s.bridge || "—"} · ${s.event_count} ev · ${s.scenario || s.transport || ""}</div></div>${s.verdict === true ? '<span class="v pass">PASS</span>' : s.verdict === false ? '<span class="v fail">FAIL</span>' : ""}`;
+      const li = document.createElement("li"); li.title = s.id; if (s.id === current) li.classList.add("current"); if (S.replay?.id === s.id) li.classList.add("replaying");
+      const meta = [[s.transport, s.scenario].filter(Boolean).join(" · "), s.bridge, `${s.event_count} event${s.event_count === 1 ? "" : "s"}`].filter(Boolean).map(escapeHtml).join(" · ");
+      const tag = s.verdict === true ? '<span class="v pass">PASS</span>' : s.verdict === false ? '<span class="v fail">FAIL</span>' : s.id === current ? '<span class="v live">LIVE</span>' : "";
+      li.innerHTML = `<div><div>${escapeHtml(s.name || fmtWhen(s.created_at))}</div><div class="meta">${meta}</div></div>${tag}`;
       li.onclick = () => (s.id === current ? exitReplay() : startReplay(s.id)); ul.appendChild(li);
     }
+  };
+  $("#sessions-refresh").onclick = () => loadSessions();
+
+  // ---------- DUT controls: UART commands to the ESP32 (G14/G15) and the demo test ----------
+  const dutSend = async (cmd) => {
+    if (S.uartPort == null) { const r = await tool("uart_open", { tx: 14, rx: 15, baud: 115200 }); if (!r?.ok) return; S.uartPort = r.result?.port ?? 0; }
+    const r = await tool("uart_send", { port: S.uartPort, data: `${cmd}\n` }); if (r?.ok) dutLine("tx", cmd); else S.uartPort = null;
+  };
+  // the human's click is the wiring confirmation the bridge asks for; only the documented bench wiring is confirmed
+  $("#dut-wire").onclick = async () => {
+    try {
+      for (const [pin, [dut, out]] of Object.entries(WIRES)) {
+        if (S.state?.session.wiring?.[pin]) continue;
+        if (!S.state?.session.pending_wiring?.[pin]) await api("/api/tool", { tool: "request_wiring", args: { pin: +pin, dut_pin: dut, component: "ESP32 DUT", reason: "bench wiring", dir: out ? "out" : "in" }, actor: "tester" });
+        await api(`/api/wiring/${pin}`, { confirmed: true });
+      }
+      toast("Bench wiring confirmed"); await refresh();
+    } catch (e) { toast(e.message); }
+  };
+  $("#lcd-send").onclick = () => dutSend(`LCD ${$("#lcd-a").value}|${$("#lcd-b").value}`);
+  document.querySelectorAll("[data-led]").forEach((b) => { b.onclick = () => dutSend(b.dataset.led); });
+  $("#dut-test").onclick = async () => {
+    const v = $("#dut-verdict"); v.className = "verdict"; v.textContent = "running…";
+    try { const r = await api("/api/plans/esp32-safety/run", {}); v.className = "verdict" + (r.blocked ? "" : r.pass ? " pass" : " fail"); v.textContent = r.blocked ? "confirm wiring" : r.pass ? "PASS" : "FAIL"; toast(r.blocked ? "Blocked: confirm the wiring requests in the log" : r.pass ? "Demo test PASS" : "Demo test FAIL"); await refresh(); }
+    catch (e) { v.textContent = ""; toast(e.message); }
   };
   const loadPlans = async () => {
     const { plans } = await api("/api/plans"); const ul = $("#plan-list"); ul.innerHTML = "";
