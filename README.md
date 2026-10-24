@@ -248,6 +248,37 @@ operator responsibilities. If Bluetooth takes 20 minutes, pivot to TCP or run th
 agent on the Pi. If hardware fails, show `make demo`, then `--fixed` to contrast.
 Real GPIO, serial hardware, radio pairing and firmware flashing require bench validation.
 
+## Host core: `aperture/` (protocol v1 + Virtual Rig)
+
+The `aperture` package is the new host-side core specified in
+`project-management/02-architecture.md`. It is independent of the legacy `pi/`,
+`agent/` and `ui/` modules and will replace them epic by epic.
+
+* `aperture.pins` — J8 header table (BCM canonical), capabilities and the manifest
+  every bridge returns on `hello`.
+* `aperture.protocol` — protocol v1 ops, validation, JSON and CBOR codecs, BLE
+  chunker (1-byte header, reassembly resets on seq 0).
+* `aperture.transport` — `Transport` ABC (`connect`, `request`, `take_control`,
+  acks/events callbacks, clock sync) and `VirtualTransport`.
+* `aperture.rig` — `VirtualRig`: in-memory bridge with a deterministic clock,
+  take-control handshake, watchdog fail-safe, pin modes/pulls, pulse, PWM, UART,
+  SPI, I2C, edge-list capture and stream mode; scriptable behaviors
+  (`Loopback`, `Button`, `Blinker`, `UartEcho`, `I2cRegisterDevice`,
+  `SpiLoopback`, `ScriptedDut` = the ESP32 safety demo) loaded from
+  `aperture/rig/scenarios/*.json`.
+
+```python
+from aperture.transport import VirtualTransport
+t = VirtualTransport(scenario="button_led")
+t.connect(); t.take_control()
+t.request("pin.mode", pin=17, mode="input"); t.request("stream.set", pins=[17], on=True)
+t.on_event(print)                       # pin.change / uart.rx / capture.done / control.*
+t.rig.behavior("button").press(); t.rig.advance(20_000)   # LED on GPIO17 follows 12 ms later
+```
+
+`tests/conformance/` holds the protocol conformance suite every transport/bridge
+pair must pass identically.
+
 ## Development
 
 `ruff check . && pytest -q`; `make demo`. See [protocol](docs/protocol.md).

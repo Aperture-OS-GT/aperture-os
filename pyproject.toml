@@ -19,11 +19,14 @@ dev = ["pytest>=8", "ruff>=0.9"]
 aperture-daemon = "pi.daemon:main"
 aperture-agent = "agent.main:main"
 aperture-ui = "ui.server:main"
+aperture = "aperture.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["pi*", "agent*", "ui*", "profiles*"]
+include = ["aperture*", "pi*", "agent*", "ui*", "profiles*"]
 
 [tool.setuptools.package-data]
+"aperture.rig" = ["scenarios/*.json"]
+"aperture.plans" = ["examples/*.json"]
 ui = ["static/*"]
 profiles = ["*.json"]
 

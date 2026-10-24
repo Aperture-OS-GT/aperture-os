@@ -1,0 +1,113 @@
+{
+ "cleanup": [
+  {
+   "args": {},
+   "id": "c1",
+   "tool": "release_all"
+  }
+ ],
+ "name": "Boot OK",
+ "requires": {
+  "scenario": "button_led",
+  "uart": [
+   {
+    "baud": 115200,
+    "rx": 15,
+    "tx": 14
+   }
+  ],
+  "wiring": [
+   {
+    "dir": "out",
+    "dut": "?",
+    "pin": 14
+   },
+   {
+    "dir": "in",
+    "dut": "?",
+    "pin": 15
+   },
+   {
+    "dir": "in",
+    "dut": "LED",
+    "pin": 17
+   },
+   {
+    "dir": "out",
+    "dut": "BTN",
+    "pin": 22
+   }
+  ]
+ },
+ "schema": 1,
+ "slug": "boot-ok",
+ "source": "confirm GPIO17 goes high within 50 ms of pressing the button on GPIO22; verify the ESP32 prints BOOT OK over UART",
+ "steps": [
+  {
+   "args": {
+    "mode": "input",
+    "pin": 17
+   },
+   "id": "s1",
+   "tool": "set_mode"
+  },
+  {
+   "args": {
+    "initial": 1,
+    "mode": "output",
+    "pin": 22
+   },
+   "id": "s2",
+   "tool": "set_mode"
+  },
+  {
+   "args": {
+    "level": 0,
+    "pin": 22
+   },
+   "id": "s3",
+   "tool": "write"
+  },
+  {
+   "args": {
+    "edge": "rising",
+    "pin": 17,
+    "timeout_ms": 50
+   },
+   "assert": true,
+   "id": "s4",
+   "name": "GPIO17 rising within 50 ms",
+   "on_fail": "continue",
+   "tool": "wait_for"
+  },
+  {
+   "args": {
+    "level": 1,
+    "pin": 22
+   },
+   "id": "s5",
+   "tool": "write"
+  },
+  {
+   "args": {
+    "baud": 115200,
+    "rx": 15,
+    "tx": 14
+   },
+   "id": "s6",
+   "tool": "uart_open"
+  },
+  {
+   "args": {
+    "pattern": "BOOT\\ OK",
+    "port": 0,
+    "timeout_ms": 2000
+   },
+   "assert": true,
+   "id": "s7",
+   "name": "UART prints 'BOOT OK'",
+   "on_fail": "continue",
+   "tool": "uart_expect"
+  }
+ ]
+}

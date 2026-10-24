@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aperture OS — Rig Console</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%228%22 cy=%228%22 r=%227%22 fill=%22%23bc5d13%22/%3E%3Ccircle cx=%228%22 cy=%228%22 r=%223%22 fill=%22%23fbfaf7%22/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo"></span>Aperture OS <span class="muted" id="version"></span></div>
+  <div class="topbar-right">
+    <span class="pill" id="replay-pill" hidden>REPLAY <button id="replay-exit" class="link">exit</button></span>
+    <span class="pill" id="clock"></span>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- LEFT: rig panel + sessions -->
+  <aside class="col col-left">
+    <section class="card" id="rig">
+      <div class="card-head">
+        <h2>Rig</h2>
+        <span class="status" id="conn-status"><i class="dot"></i><span>Disconnected</span></span>
+      </div>
+      <dl class="kv" id="rig-info">
+        <dt>Bridge</dt><dd id="rig-bridge">—</dd>
+        <dt>Firmware</dt><dd id="rig-fw">—</dd>
+        <dt>Board</dt><dd id="rig-board">—</dd>
+        <dt>Power</dt><dd id="rig-power">—</dd>
+        <dt>Control</dt><dd id="rig-control">—</dd>
+      </dl>
+      <div class="row">
+        <select id="transport">
+          <option value="virtual">Virtual Rig</option>
+          <option value="tcp">Pi bridge (TCP)</option>
+          <option value="ble">Pi bridge (BLE)</option>
+        </select>
+        <select id="scenario"></select>
+        <input id="target" placeholder="host:port or BLE name" hidden>
+      </div>
+      <div class="row btns">
+        <button id="btn-connect" class="primary">Connect</button>
+        <button id="btn-disconnect">Disconnect</button>
+        <button id="btn-control">Take control</button>
+      </div>
+      <div class="row btns">
+        <button id="btn-release">Release all</button>
+        <button id="btn-newsession">New session</button>
+      </div>
+      <div id="behaviors" class="chips"></div>
+    </section>
+
+    <section class="card grow" id="sessions">
+      <div class="card-head"><h2>Sessions</h2><button id="sessions-refresh" class="link">refresh</button></div>
+      <ul class="list" id="session-list"></ul>
+    </section>
+
+    <section class="card" id="plans">
+      <div class="card-head"><h2>Plans</h2></div>
+      <ul class="list" id="plan-list"></ul>
+    </section>
+  </aside>
+
+  <!-- CENTER: current session -->
+  <section class="col col-center">
+    <div class="card grow" id="session">
+      <div class="card-head">
+        <h2>Session <span class="mono muted" id="session-id"></span> <span class="verdict" id="verdict"></span></h2>
+        <div class="filters" id="filters">
+          <label><input type="checkbox" data-f="agent" checked> agent</label>
+          <label><input type="checkbox" data-f="tester" checked> tester</label>
+          <label><input type="checkbox" data-f="bridge" checked> bridge</label>
+          <label><input type="checkbox" data-f="pin" checked> pins</label>
+          <label><input type="checkbox" data-f="bus" checked> bus</label>
+          <label><input type="checkbox" data-f="assert" checked> asserts</label>
+          <input id="search" placeholder="filter…">
+          <a id="export-json" class="link" download>JSON</a>
+          <a id="export-md" class="link" download>Report</a>
+        </div>
+      </div>
+      <div class="log" id="log"></div>
+      <div id="replay-bar" class="replay-bar" hidden>
+        <button id="rp-play">▶</button>
+        <input type="range" id="rp-pos" min="0" value="0">
+        <span class="mono" id="rp-time">0.000 s</span>
+        <select id="rp-speed"><option value="1">1×</option><option value="4">4×</option><option value="16">16×</option><option value="0">instant</option></select>
+      </div>
+      <form class="composer" id="composer">
+        <input id="prompt" placeholder="Ask the agent: “set GPIO17 high”, “confirm GPIO17 goes high within 50 ms of pressing the button on GPIO22”…" autocomplete="off">
+        <button class="primary" type="submit">Send</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- RIGHT: pin map + inspector -->
+  <aside class="col col-right">
+    <section class="card grow" id="pinmap">
+      <div class="card-head"><h2>Header <span class="muted">J8 · 40-pin</span></h2>
+        <span class="legend"><i class="sw out"></i>out <i class="sw in"></i>in <i class="sw pwm"></i>pwm <i class="sw hi"></i>HIGH</span></div>
+      <div class="header-wrap"><svg id="header-svg" viewBox="0 0 120 520" role="img" aria-label="40-pin header"></svg></div>
+    </section>
+    <section class="card" id="inspector">
+      <div class="card-head"><h2 id="insp-title">Pin</h2><span class="muted mono" id="insp-phys"></span></div>
+      <div id="insp-body" class="muted">Select a pin.</div>
+      <div class="row btns" id="insp-actions" hidden>
+        <select id="insp-mode">
+          <option value="input">input</option><option value="input_pullup">pull-up</option><option value="input_pulldown">pull-down</option>
+          <option value="output">output</option><option value="pwm">pwm</option><option value="disabled">disabled</option>
+        </select>
+        <button id="insp-apply">Set mode</button>
+        <button id="insp-hi">HIGH</button><button id="insp-lo">LOW</button>
+        <button id="insp-pulse">Pulse 1 ms</button>
+      </div>
+      <div class="row" id="insp-wiring" hidden>
+        <span class="muted">Wiring:</span> <span id="insp-wiring-text"></span>
+        <button id="insp-wire-ok" class="primary">Confirm</button><button id="insp-wire-no">Reject</button>
+      </div>
+      <div class="sparkline" id="insp-spark"></div>
+    </section>
+  </aside>
+</main>
+<template id="tpl-plan-run">
+  <div class="plan-card"><div class="plan-title"></div><ol class="plan-steps"></ol><div class="row btns"><button class="primary run">Run</button><button class="save">Save</button></div></div>
+</template>
+<script src="/app.js"></script>
+</body>
+</html>

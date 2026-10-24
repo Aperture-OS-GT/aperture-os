@@ -1,0 +1,6 @@
+{"name": "button_led", "title": "Button + LED + UART", "description": "Active-low button on GPIO22 drives an LED on GPIO17 12 ms later; serial device on GPIO14/15 prints BOOT OK.",
+ "behaviors": [{"type": "Button", "name": "button", "pin": 22, "pressed_level": 0, "wired_to": {"dut": "BTN"}},
+               {"type": "Loopback", "a": 22, "b": 17, "invert": true, "delay_us": 12000},
+               {"type": "UartEcho", "rx_pin": 14, "tx_pin": 15, "baud": 115200, "banner": "BOOT OK\n", "delay_ms": 300},
+               {"type": "Blinker", "pin": 24, "hz": 2.0, "duty": 0.5}],
+ "wiring_policy": "off"}

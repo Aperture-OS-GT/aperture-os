@@ -1,0 +1,3 @@
+{"name": "uart_echo", "title": "UART echo device", "description": "Serial device on GPIO14/15 @115200: prints BOOT OK 300 ms after open, echoes bytes, answers ping.",
+ "behaviors": [{"type": "UartEcho", "rx_pin": 14, "tx_pin": 15, "baud": 115200, "banner": "BOOT OK\n", "delay_ms": 300, "responses": {"ping": "pong\n"}}],
+ "wiring_policy": "off"}
