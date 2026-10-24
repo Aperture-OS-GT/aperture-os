@@ -3,8 +3,10 @@
 Op semantics, error codes and payloads mirror ``aperture.rig.virtual.VirtualRig`` so the
 host cannot tell a bench from the Virtual Rig except by timing. Hardware-only rules:
 
-* pins owned by an enabled bus (UART0 14/15, I2C1 2/3, SPI0 7-11) are reserved: GPIO ops
-  on them fail ``pin_mode`` because claiming them would take the pin away from the bus;
+* pins owned by an enabled bus (UART0 14/15, I2C1 2/3, SPI0 7-11) or by flashing (the
+  DUT's BOOT and EN) are reserved: GPIO ops on them fail ``pin_mode`` because claiming them
+  would take the pin away from its owner;
+* ``flash.*`` programs the ESP32 DUT over UART0 (``hardware_flash``);
 * captures sample on a thread at ``rate_hz`` (edges quantised like the Virtual Rig);
 * stream events come from driver edge callbacks for inputs and from the executor's own
   writes for outputs; software PWM edges are not streamed;
@@ -26,6 +28,7 @@ from aperture.protocol import DRIVING_OPS, ProtocolError, event, validate_reques
 from .control import Control
 from .drivers import HardwareDriver
 from .hardware_buses import NO_BUSES, BusConfig, BusOps
+from .hardware_flash import FlashOps
 
 log = logging.getLogger(__name__)
 CONTROLLER_OPS = frozenset({"ping", "uart.read", "i2c.read", "i2c.scan"})
@@ -54,7 +57,7 @@ class HwCapture:
     done: bool = False
 
 
-class HardwareExecutor(BusOps):
+class HardwareExecutor(BusOps, FlashOps):
     def __init__(self, driver: HardwareDriver, name: str, buses: BusConfig = NO_BUSES,
                  limits: dict | None = None, denied: frozenset[int] = frozenset()):
         self.driver, self.name, self.buses = driver, name, buses
@@ -65,6 +68,7 @@ class HardwareExecutor(BusOps):
         self.reserved = buses.reserved_pins()
         self.pins = {bcm: HwPin(bcm) for bcm in P.GPIO_PINS if bcm not in self.denied}
         self.ports: dict = {}
+        self.flash_images: dict[int, bytearray] = {}  # offset -> bytes staged by flash.write
         self.captures: dict[int, HwCapture] = {}
         self.streams: set[int] = set()
         self._next_capture = 1
@@ -341,8 +345,9 @@ class HardwareExecutor(BusOps):
         pin.mode, pin.drive, pin.pwm = "disabled", None, None
 
     def _release_all(self) -> None:
-        """Every GPIO to high-Z, PWM off, ports closed, captures cancelled, streams cleared.
-        A failure on one pin is logged and the rest are still released."""
+        """Every GPIO to high-Z, PWM off, ports closed, captures cancelled, streams and staged
+        flash images cleared. A failure on one pin is logged and the rest are still released."""
+        self.flash_images = {}  # a later controller must never flash someone else's upload
         for pin in self.pins.values():
             if pin.bcm in self.reserved:
                 continue

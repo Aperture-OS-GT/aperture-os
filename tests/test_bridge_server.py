@@ -177,6 +177,25 @@ class SpyRig(VirtualRig):
         self.closed = True
 
 
+def test_unexpected_executor_error_is_answered_and_the_link_survives(rig, bridge, monkeypatch,
+                                                                     caplog):
+    alice = hello(bridge, "alice")
+    execute = rig.execute
+
+    def buggy(message):
+        if message["op"] == "list_pins":
+            raise KeyError("pins")
+        return execute(message)
+
+    monkeypatch.setattr(rig, "execute", buggy)
+    with caplog.at_level("ERROR", logger="pi.bridge.server"):
+        reply, messages = call(bridge, alice, "list_pins")
+    assert messages[0]["ack"] and reply["err"] == "io"
+    assert reply["msg"] == "internal bridge error: KeyError"
+    assert "list_pins from alice failed unexpectedly" in caplog.text
+    assert call(bridge, alice, "ping")[0]["ok"]
+
+
 def test_shutdown_releases_outputs_and_closes_executor():
     rig = SpyRig(load_scenario("loopback"))
     bridge = BridgeServer(rig)

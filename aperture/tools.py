@@ -3,15 +3,18 @@
 Every tool is one ``Request`` with the full lifecycle; tools that drive a pin are
 wiring-gated (policy ``ask``) so the agent must have a human mark the wire first.
 ``schemas()`` generates OpenAI-compatible function schemas from ``SPECS`` so the
-LLM, the plan validator and the implementations share one source of truth.
+LLM, the plan validator and the implementations share one source of truth. The ESP32
+tools (``program_esp32``, ``led``, ``lcd_print``) talk to the esp32_dut firmware over the
+Pi's UART0 (GPIO14/15); a request refused with ``not_controller`` re-takes control once.
 """
 from __future__ import annotations
 
 import base64
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
+from . import firmware as fw
 from .pins import MODES
 from .protocol import ProtocolError
 from .session import Session
@@ -19,6 +22,26 @@ from .transport.base import Transport, TransportError
 
 EDGES = ("rising", "falling", "any")
 TRANSPORTS = ("virtual", "tcp", "ble")
+LED_STATES = ("blink", "on", "off")
+CONTROL_OPS = frozenset({"control.take", "control.release"})
+VIRTUAL_BRIDGE = "virtual-rig"
+DEFAULT_TCP_HOST = "127.0.0.1"
+TCP_TARGET = re.compile(r"(?:\[(?P<v6>[0-9A-Fa-f:.]+)\]|(?P<host>[^\s:\[\]]*))(?::(?P<port>\d{1,5}))?")
+UART_READ_MAX = 4096
+FLUSH_READS_MAX = 8
+# ESP32 DUT wiring (BCM on the Pi side): UART0 for flashing and commands, EN reset, BOOT strap.
+ESP32_TX, ESP32_RX, ESP32_BAUD = 14, 15, 115200
+ESP32_EN, ESP32_BOOT = 25, 24
+ESP32_WIRING = {ESP32_TX: ("RX0", "out"), ESP32_RX: ("TX0", "in"), ESP32_EN: ("EN", "out"),
+                ESP32_BOOT: ("BOOT/GPIO0", "out")}
+FLASH_CHUNK = 32 * 1024  # protocol limit for one bytes field
+FLASH_BAUD = 115200
+BOOT_BANNER, BOOT_TIMEOUT_MS = r"BOOT OK", 4000
+DUT_REPLY_TIMEOUT_MS = 2000
+LED_REPLY = r"(OK LED[^\r\n]*|ERR[^\r\n]*)"
+LCD_REPLY = r"(OK LCD|ERR[^\r\n]*)"
+LCD_COLS = 16
+DEFAULT_BLINK_HZ = 2
 
 
 class ToolError(Exception):
@@ -108,8 +131,35 @@ SPECS: dict[str, dict] = {
                    "params": {"behavior": _p("string", "Behavior name, or 'dut' for reset"),
                               "action": _p("string", "press, release, click, reset"),
                               "ms": _p("integer", "Click duration", False)}},
+    "program_esp32": {"description": "Build ESP32 firmware with PlatformIO and flash it from the Pi over UART0 "
+                                     "(GPIO14 TXD -> ESP32 RX0, GPIO15 RXD <- TX0), resetting through GPIO25 -> EN "
+                                     "and entering the ROM bootloader through GPIO24 -> BOOT/GPIO0. Needs GPIO14, 15, "
+                                     "25 and 24 marked as wired (not 24 with manual_boot). Every open UART port is "
+                                     "closed first, so earlier port ids become invalid; the ESP32 UART is reopened "
+                                     "(result 'port') and boot_ok says whether the firmware printed 'BOOT OK'. Can "
+                                     "take minutes. On the Virtual Rig nothing is built: the flash is simulated with "
+                                     "the last build, or placeholder images when there is none.",
+                      "params": {"firmware": _p("string", "PlatformIO project under firmware/ (default esp32_dut)",
+                                                False),
+                                 "build": _p("boolean", "Build before flashing (default true); false flashes the "
+                                                        "last build. Ignored on the Virtual Rig", False),
+                                 "manual_boot": _p("boolean", "Set when GPIO24 is not wired to BOOT: the human holds "
+                                                              "the ESP32 BOOT button through the reset and lets go "
+                                                              "once flashing starts (default false)", False)}},
+    "led": {"description": "Drive the ESP32 status LED (ESP32 GPIO13) through the esp32_dut firmware's UART0 "
+                           "command port (Pi GPIO14/15 at 115200 baud, opened on first use): blink at hz, or hold "
+                           "it on or off. Returns the firmware's reply ('OK LED ...'); an 'ERR ...' reply fails "
+                           "with dut_error.",
+            "params": {"state": _p("string", "blink, on or off", enum=list(LED_STATES)),
+                       "hz": _p("number", "Blink frequency in Hz, 0 < hz <= 50 (default 2); blink only", False)}},
+    "lcd_print": {"description": "Show text on the ESP32's 16x2 LCD through the esp32_dut firmware's UART0 command "
+                                 "port (Pi GPIO14/15 at 115200 baud, opened on first use). Each line is cut to 16 "
+                                 "characters and '|' and line breaks are removed. Waits for 'OK LCD'; an 'ERR ...' "
+                                 "reply fails with dut_error.",
+                  "params": {"line1": _p("string", "Top line (16 characters max)"),
+                             "line2": _p("string", "Bottom line (16 characters max, default blank)", False)}},
 }
-WIRING_GATED = {"set_mode", "write", "pulse", "pwm", "uart_open"}
+WIRING_GATED = {"set_mode", "write", "pulse", "pwm", "uart_open", "program_esp32", "led", "lcd_print"}
 
 
 def schemas() -> list[dict]:
@@ -173,6 +223,11 @@ def _text_or_hex(data: str) -> bytes:
     return data.encode("utf-8").decode("unicode_escape").encode("latin-1")
 
 
+def _lcd_text(text: str) -> str:
+    """One LCD row: printable characters only, no '|' (the firmware's line separator), 16 at most."""
+    return "".join(ch for ch in text if ch.isprintable() and ch != "|")[:LCD_COLS]
+
+
 class Tools:
     def __init__(self, session: Session, wiring_policy: str | None = None,
                  transport_factory: Callable[..., Transport] | None = None):
@@ -181,6 +236,7 @@ class Tools:
         self.transport_factory = transport_factory or default_transport_factory
         self.last_capture: dict | None = None
         self._rx: dict[int, bytearray] = {}
+        self._uart_pins: dict[int, tuple[int, int, int]] = {}  # open port -> (tx, rx, baud)
 
     # --- dispatch -------------------------------------------------------------------
     def call(self, tool: str, /, **args) -> dict:
@@ -205,10 +261,48 @@ class Tools:
 
     def _req(self, op: str, observe=None, **args):
         request = self.session.request(op, actor="agent", observe=observe, **args)
+        if not request.ok and request.err == "not_controller" and op not in CONTROL_OPS \
+                and self._retake_control(op):
+            request = self.session.request(op, actor="agent", observe=observe, **args)
         if not request.ok:
-            raise ToolError(request.err or "io", request.stages["executed"].get("msg") or "bridge error",
-                            request=request.id, **{k: v for k, v in request.result.items()})
+            raise ToolError(request.err or "io", self._bridge_msg(request), request=request.id,
+                            **{k: v for k, v in request.result.items()})
         return request
+
+    def _bridge_msg(self, request) -> str:
+        """The bridge's error text: the Request keeps the code, the session's executed event the text."""
+        msg = request.stages["executed"].get("msg")
+        if not msg:
+            event = next((e for e in reversed(self.session.events) if e["kind"] == "request.stage"
+                          and e.get("req") == request.id and e.get("stage") == "executed"), None)
+            msg = (event or {}).get("msg")
+        return msg or "bridge error"
+
+    def _retake_control(self, op: str) -> bool:
+        """Take control back once after the bridge refused ``op``. Losing control released the rig, so
+        every cached UART port is stale afterwards."""
+        transport = self.session.transport
+        if transport is None or not transport.connected:
+            return False
+        reason = self._lost_reason(op)
+        token = {"token": transport.control_token} if transport.control_token else {}
+        if not self.session.request("control.take", actor="agent", **token).ok:
+            return False
+        self._forget_ports(self._uart_pins.keys() | self._rx.keys())
+        self.session.note(f"control re-taken after {reason}; retrying {op}", "agent")
+        return True
+
+    def _lost_reason(self, op: str) -> str:
+        last = next((e for e in reversed(self.session.events) if e["kind"] in ("control.lost", "control.changed")),
+                    None)
+        if last is not None and last["kind"] == "control.lost":
+            return f"control.lost ({last.get('reason', 'unknown')})"
+        return f"not_controller on {op}"
+
+    def _forget_ports(self, ports: Iterable[int]) -> None:
+        for port in list(ports):
+            self._rx.pop(port, None)
+            self._uart_pins.pop(port, None)
 
     def _result(self, request, **extra) -> dict:
         return {"request": request.id, "stage": request.stage, **request.result, **extra}
@@ -296,19 +390,23 @@ class Tools:
     def uart_open(self, tx: int, rx: int, baud: int) -> dict:
         self._gate(tx, rx)
         request = self._req("uart.open", tx=tx, rx=rx, baud=baud)
-        self._rx[request.result["port"]] = bytearray()
+        port = request.result["port"]
+        self._rx[port] = bytearray()
+        self._uart_pins[port] = (tx, rx, baud)
         return self._result(request)
 
     def uart_close(self, port: int) -> dict:
-        self._rx.pop(port, None)
+        self._forget_ports([port])
         return self._result(self._req("uart.close", port=port))
 
     def uart_send(self, port: int, data: str) -> dict:
         return self._result(self._req("uart.write", port=port, data=_text_or_hex(data)))
 
-    def _drain(self, port: int, timeout_ms: int) -> None:
-        request = self._req("uart.read", port=port, max=4096, timeout_ms=timeout_ms)
-        self._rx.setdefault(port, bytearray()).extend(_b64(request.result.get("data")))
+    def _drain(self, port: int, timeout_ms: int) -> int:
+        request = self._req("uart.read", port=port, max=UART_READ_MAX, timeout_ms=timeout_ms)
+        data = _b64(request.result.get("data"))
+        self._rx.setdefault(port, bytearray()).extend(data)
+        return len(data)
 
     def uart_expect(self, port: int, pattern: str, timeout_ms: int) -> dict:
         try:
@@ -439,6 +537,7 @@ class Tools:
     def release_all(self) -> dict:
         self.last_capture = None
         self._rx.clear()
+        self._uart_pins.clear()
         return self._result(self._req("release_all"))
 
     # --- human / misc -----------------------------------------------------------------------
@@ -470,6 +569,135 @@ class Tools:
         self.session.record("dut.action", "tester", behavior=behavior, action=action, ms=ms)
         return {"ok": True, "behavior": target.describe()}
 
+    # --- ESP32 DUT (esp32_dut firmware) ------------------------------------------------------
+    def program_esp32(self, firmware: str = fw.DEFAULT_PROJECT, build: bool = True,
+                      manual_boot: bool = False) -> dict:
+        pins = (ESP32_TX, ESP32_RX, ESP32_EN) + (() if manual_boot else (ESP32_BOOT,))
+        self._gate_esp32(pins, f"flash {firmware} onto the ESP32")
+        images, origin = self._firmware_images(firmware, build)
+        self._req("flash.begin")
+        for offset, data in images:
+            self._stage(offset, data)
+        run = self._flash_run(manual_boot)
+        return self._result(run, build=origin, **self._await_boot())
+
+    def led(self, state: str, hz: float = DEFAULT_BLINK_HZ) -> dict:
+        line = f"LED BLINK {hz:g}" if state == "blink" else f"LED {state.upper()}"
+        return self._esp32_command(line, LED_REPLY)
+
+    def lcd_print(self, line1: str, line2: str = "") -> dict:
+        return self._esp32_command(f"LCD {_lcd_text(line1)}|{_lcd_text(line2)}", LCD_REPLY)
+
+    def _virtual_rig(self) -> bool:
+        """In-process Virtual Rig or a ``--backend virtual`` bridge: flashing is simulated."""
+        return (self.session.manifest or {}).get("bridge") == VIRTUAL_BRIDGE
+
+    def _gate_esp32(self, pins: tuple[int, ...], reason: str) -> None:
+        """Ask for every missing ESP32 wire at once, labelled, before the usual gate refuses."""
+        if self._policy() != "off":
+            for pin in pins:
+                if pin not in self.session.wiring and pin not in self.session.pending_wiring:
+                    dut_pin, direction = ESP32_WIRING[pin]
+                    self.session.request_wiring(pin, dut_pin, "ESP32", reason, direction, "agent")
+        self._gate(*pins)
+
+    def _firmware_images(self, firmware: str, build: bool) -> tuple[list[tuple[int, bytes]], str]:
+        """Images to flash and their origin: built now, cached (last build) or placeholder (Virtual Rig)."""
+        try:
+            fw.project_dir(firmware)
+        except fw.FirmwareError as exc:
+            raise ToolError("bad_request", str(exc)) from None
+        virtual = self._virtual_rig()
+        try:
+            if build and not virtual:
+                fw.build(firmware)
+                return fw.images(firmware), "built"
+            if fw.has_build(firmware):
+                return fw.images(firmware), "cached"
+        except fw.FirmwareError as exc:
+            raise ToolError("build_failed", str(exc), firmware=firmware) from None
+        if virtual:
+            return fw.placeholder_images(), "placeholder"
+        raise ToolError("bad_request", f"{firmware} has not been built; call program_esp32 with build=true")
+
+    def _stage(self, offset: int, data: bytes) -> None:
+        """flash.write one image in protocol-sized chunks; the bridge appends them per offset."""
+        for start in range(0, len(data), FLASH_CHUNK):
+            chunk = data[start:start + FLASH_CHUNK]
+            staged = self._req("flash.write", offset=offset, data=chunk).result.get("size")
+            if staged != start + len(chunk):
+                raise ToolError("io", f"bridge holds {staged} bytes for 0x{offset:x}, expected "
+                                      f"{start + len(chunk)}; nothing was flashed")
+
+    def _flash_run(self, manual_boot: bool):
+        """flash.run closes every UART port first (the flasher needs the serial device)."""
+        try:
+            run = self._req("flash.run", baud=FLASH_BAUD, manual_boot=manual_boot)
+        except ToolError as exc:
+            if exc.code in ("io", "timeout"):  # failed or lost mid-flash: the ports were already closed
+                self._forget_ports(self._uart_pins.keys() | self._rx.keys())
+            raise
+        self._forget_ports(run.result.get("uart_closed") or [])
+        return run
+
+    def _await_boot(self) -> dict:
+        """Reopen the ESP32 UART and wait for the boot banner; a miss is reported, not raised."""
+        port = None
+        try:
+            port = self._esp32_uart()
+            self.uart_expect(port, BOOT_BANNER, BOOT_TIMEOUT_MS)
+        except ToolError as exc:
+            return {"boot_ok": False, "port": port, "boot_error": f"{exc.code}: {exc.msg}"}
+        return {"boot_ok": True, "port": port}
+
+    def _esp32_uart(self) -> int:
+        """Port id of the ESP32 UART0 link: an open port on GPIO14/15 at 115200, else a new one."""
+        for port, (tx, rx, baud) in list(self._uart_pins.items()):
+            if (tx, rx) == (ESP32_TX, ESP32_RX):
+                if baud == ESP32_BAUD:
+                    return port
+                self.uart_close(port)
+        self._gate_esp32((ESP32_TX, ESP32_RX), "talk to the esp32_dut firmware on UART0")
+        return self.uart_open(ESP32_TX, ESP32_RX, ESP32_BAUD)["port"]
+
+    def _esp32_command(self, line: str, reply: str) -> dict:
+        """Send one command line to the firmware and return its reply line; ERR replies raise dut_error.
+        A cached port the bridge closed meanwhile (control lost or re-taken) is reopened once."""
+        port = self._esp32_uart()
+        try:
+            text = self._exchange(port, line, reply)
+        except ToolError as exc:
+            if port in self._uart_pins and exc.code != "bad_request":  # bad_request here: port not open
+                raise
+            self._forget_ports([port])
+            port = self._esp32_uart()
+            text = self._exchange(port, line, reply)
+        if text.startswith("ERR"):
+            raise ToolError("dut_error", text, port=port, command=line)
+        return {"reply": text, "port": port, "command": line}
+
+    def _exchange(self, port: int, line: str, reply: str) -> str:
+        self._flush_rx(port)
+        self._req("uart.write", port=port, data=(line + "\n").encode("ascii", "replace"))
+        return self.uart_expect(port, reply, DUT_REPLY_TIMEOUT_MS)["match"].strip()
+
+    def _flush_rx(self, port: int) -> None:
+        """Drop input that arrived before a command (telemetry, old replies) so it cannot pass as the answer."""
+        for _ in range(FLUSH_READS_MAX):
+            if self._drain(port, 0) < UART_READ_MAX:
+                break
+        self._rx[port] = bytearray()
+
+
+def _tcp_address(target: str | None, default_port: int) -> tuple[str, int]:
+    """``host[:port]`` or ``[v6addr][:port]``; host defaults to 127.0.0.1 and port to the bridge's."""
+    match = TCP_TARGET.fullmatch((target or "").strip())
+    port = int(match["port"]) if match and match["port"] else default_port
+    if match is None or not 0 < port < 65536:
+        raise ToolError("bad_request", f"tcp target must be host:port (e.g. 192.168.1.20:{default_port}), "
+                                       f"got {target!r}")
+    return match["v6"] or match["host"] or DEFAULT_TCP_HOST, port
+
 
 def default_transport_factory(kind: str, scenario: str | None = None, target: str | None = None,
                               **kwargs) -> Transport:
@@ -477,7 +705,9 @@ def default_transport_factory(kind: str, scenario: str | None = None, target: st
         from .transport.virtual import VirtualTransport
         return VirtualTransport(scenario=scenario or "empty", **kwargs)
     if kind == "tcp":
-        raise TransportError("TCP transport lands with the Pi bridge PR (US-16)")
+        from .transport.tcp import DEFAULT_PORT, TcpTransport
+        host, port = _tcp_address(target, DEFAULT_PORT)
+        return TcpTransport(host, port, **kwargs)
     if kind == "ble":
         raise TransportError("BLE transport lands with the Pi bridge PR (US-15)")
     raise ToolError("bad_request", f"unknown transport {kind!r}")

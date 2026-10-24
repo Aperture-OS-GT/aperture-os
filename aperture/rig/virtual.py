@@ -21,6 +21,10 @@ from .. import pins as P
 from ..protocol import DRIVING_OPS, ProtocolError, event, validate_request
 
 SCENARIO_DIR = Path(__file__).with_name("scenarios")
+FLASH_APP_OFFSET = 0x10000           # esptool layout: the application image
+FLASH_STAGE_LIMIT = 4 * 1024 * 1024  # ESP32 DevKit V1 flash size
+FLASH_BAUD = 115200
+UART_BAUD_MIN, UART_BAUD_MAX = 300, 4_000_000
 
 
 class VirtualClock:
@@ -106,6 +110,7 @@ class VirtualRig:
         self._next_capture = 1
         self._pwm_gen: dict[int, int] = {}
         self._uart_busy_until: dict[int, int] = {}
+        self._flash: dict[int, int] = {}  # staged image sizes by offset; the bytes are never needed
         from .behaviors import make_behavior
         for spec in self.scenario.get("behaviors", []):
             self.add_behavior(make_behavior(spec))
@@ -395,8 +400,7 @@ class VirtualRig:
         for pin in (self.pins[r["tx"]], self.pins[r["rx"]]):
             if pin.mode != "disabled" or any(pin.bcm in (p.tx, p.rx) for p in self.ports.values()):
                 raise ProtocolError("pin_mode", f"GPIO{pin.bcm} is already in use")
-        if r["baud"] < 300 or r["baud"] > 4_000_000:
-            raise ProtocolError("range", "baud must be 300..4000000")
+        _check_baud(r["baud"])
         port = UartPort(self._next_port, r["tx"], r["rx"], r["baud"])
         self._next_port += 1
         self.ports[port.port] = port
@@ -503,27 +507,71 @@ class VirtualRig:
             self.streams.difference_update(r["pins"])
         return {"pins": sorted(self.streams)}
 
+    # --- flashing (simulated: images are staged and reported, never interpreted) -------
+    def _op_flash_begin(self, r):
+        self._flash = {}
+        return {}
+
+    def _op_flash_write(self, r):
+        if sum(self._flash.values()) + len(r["data"]) > FLASH_STAGE_LIMIT:
+            raise ProtocolError("range", f"staged images exceed {FLASH_STAGE_LIMIT // (1024 * 1024)} MiB")
+        size = self._flash.get(r["offset"], 0) + len(r["data"])
+        self._flash = {**self._flash, r["offset"]: size}
+        return {"offset": r["offset"], "size": size}
+
+    def _op_flash_run(self, r):
+        staged, self._flash = self._flash, {}  # every run consumes the staging, whatever the outcome
+        if FLASH_APP_OFFSET not in staged:
+            raise ProtocolError("bad_request", f"no app image staged at 0x{FLASH_APP_OFFSET:x}")
+        baud = r.get("baud", FLASH_BAUD)
+        _check_baud(baud)
+        closed = self._close_uarts()  # the real flasher needs the serial device
+        for behavior in self.behaviors:
+            behavior.on_flash()
+        images = [{"offset": offset, "size": size} for offset, size in sorted(staged.items())]
+        return {"flashed": True, "simulated": True, "seconds": 0.0, "images": images, "uart_closed": closed,
+                "log": _flash_log(images, baud, r.get("manual_boot", False))}
+
+    def _close_uarts(self) -> list[int]:
+        closed = sorted(self.ports)
+        self.ports.clear()
+        self._uart_busy_until.clear()
+        return closed
+
     def _op_release_all(self, r):
         self._release_all()
         return {}
 
     def _release_all(self) -> None:
+        released = [bcm for bcm, pin in self.pins.items() if pin.mode != "disabled"]
         for pin in self.pins.values():
             self._stop_pwm(pin)
             pin.mode = "disabled"
             pin.drive = None
             self._resolve(pin)
-        self.ports.clear()
-        self._uart_busy_until.clear()
+        self._close_uarts()
         for capture in self.captures.values():
             self._finish_capture(capture, True)
         self.streams.clear()
+        for bcm in released:  # as pin.mode does: e.g. a released reset line lets the DUT boot
+            self._notify_pin(bcm)
 
     def reset_dut(self) -> None:
         """Reset every behavior (the DUT side), e.g. after a scenario change."""
         with self.lock:
             for behavior in self.behaviors:
                 behavior.reset()
+
+
+def _check_baud(baud: int) -> None:
+    if not UART_BAUD_MIN <= baud <= UART_BAUD_MAX:
+        raise ProtocolError("range", f"baud must be {UART_BAUD_MIN}..{UART_BAUD_MAX}")
+
+
+def _flash_log(images: list[dict], baud: int, manual_boot: bool) -> str:
+    parts = ", ".join(f"0x{image['offset']:x} ({image['size']} bytes)" for image in images)
+    boot = "manual BOOT" if manual_boot else "GPIO24 BOOT"
+    return f"simulated write-flash at {baud} baud ({boot}, GPIO25 EN): {parts}"
 
 
 def load_scenario(name_or_path: str) -> dict:

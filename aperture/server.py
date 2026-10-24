@@ -3,11 +3,16 @@
 One ``ConsoleApp`` owns the current ``Session``/``Tools`` pair; the UI renders
 session events through one reducer for live and replay. Binds loopback only and
 rejects cross-origin POSTs — this is a bench console, not a multi-user service.
+With ``OPENAI_API_KEY`` set, prompts go to the AI agent (``aperture.agent``), else to
+the offline interpreter. A keepalive thread feeds the bridge watchdog while the
+console idles and re-takes control the watchdog took away.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,8 +20,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import __version__
-from .pins import GPIO_PINS, header_rows
+from .agent import run_agent
+from .pins import DEFAULT_LIMITS, GPIO_PINS, header_rows
 from .plans import PlanError, PlanRunner, compile_plan, list_plans, load_plan, save_plan
+from .protocol import DRIVING_OPS
 from .report import render_report
 from .rig.virtual import list_scenarios
 from .session import Session, dump_session, list_sessions, load_session, summarize
@@ -25,6 +32,14 @@ from .transport.base import TransportError
 
 STATIC = Path(__file__).with_name("static")
 MAX_BODY = 1 << 20
+KEEPALIVE_TICK_S = 0.1      # short, so even a sub-second watchdog is fed in time
+KEEPALIVE_FRACTION = 3      # ping once a third of the watchdog passed without a feeding request
+KEEPALIVE_JOIN_S = 1.0
+FEEDS_WATCHDOG = DRIVING_OPS | {"ping", "control.take"}  # requests every bridge counts as alive
+AGENT_HISTORY_NOTES = 6     # earlier tester/agent notes the model sees, for follow-up prompts
+AI_FALLBACK = "AI unavailable ({}); used the offline interpreter. "
+
+log = logging.getLogger(__name__)
 
 
 class ApiError(Exception):
@@ -44,7 +59,13 @@ class ConsoleApp:
         self.feed: list[dict] = []          # every session event + console notices, with a global cursor
         self.replay: dict | None = None
         self.busy = False
+        self.agent_busy = False             # an AI prompt is running; the lock is free between its tool calls
+        self._control_lost = False          # the bridge watchdog took control away; the keepalive re-takes it
+        self._fed_at = 0.0                  # monotonic time of the last request that feeds the watchdog
+        self._closing = threading.Event()
         self._new_session()
+        self._keepalive = threading.Thread(target=self._keepalive_loop, name="console-keepalive", daemon=True)
+        self._keepalive.start()
 
     # --- session plumbing ------------------------------------------------------------
     def _new_session(self) -> Session:
@@ -57,13 +78,23 @@ class ConsoleApp:
             self.tools = Tools(self.session)
             self.session.on_event(self._push)
             self.replay = None
+            self._control_lost = False
             self._notice("session.new", session=self.session.id)
             return self.session
 
     def _push(self, event: dict) -> None:
         with self.cond:
+            self._watch_control(event)
             self.feed.append({"cursor": len(self.feed) + 1, "session": self.session.id, **event})
             self.cond.notify_all()
+
+    def _watch_control(self, event: dict) -> None:
+        """Keepalive bookkeeping from the session's own events (runs under the console lock)."""
+        if event["kind"] == "control.lost":
+            self._control_lost = True
+        elif event["kind"] == "request.stage" and event.get("stage") == "requested" \
+                and event.get("op") in FEEDS_WATCHDOG:
+            self._fed_at = time.monotonic()
 
     def _notice(self, kind: str, **fields) -> None:
         with self.cond:
@@ -85,6 +116,42 @@ class ConsoleApp:
         if rig is not None:
             rig.pump()
 
+    # --- control keepalive ------------------------------------------------------------
+    def _keepalive_loop(self) -> None:
+        while not self._closing.wait(KEEPALIVE_TICK_S):
+            if not self.lock.acquire(blocking=False):
+                continue  # a tool call holds the console and is talking to the bridge itself
+            try:
+                self._keepalive_tick()
+            except (TransportError, OSError) as exc:
+                log.warning("console keepalive: %s", exc)
+            finally:
+                self.lock.release()
+
+    def _keepalive_tick(self) -> None:
+        """Runs under the console lock, so no ``Session.request`` is in flight: the session's ack
+        callback has nothing pending and ignores the ping's (unknown) request id, and the ping
+        stays out of the session log."""
+        transport = self.session.transport
+        if not self._connected() or _manual_clock(transport):
+            return
+        if transport.control_token is None:
+            if self._control_lost:
+                self._retake_control()
+            return
+        if getattr(transport, "keepalive", False):
+            return  # TcpTransport pings by itself at half the watchdog period
+        if time.monotonic() - self._fed_at >= _watchdog_s(transport) / KEEPALIVE_FRACTION:
+            self._fed_at = time.monotonic()
+            transport.request("ping")
+
+    def _retake_control(self) -> None:
+        """Control was lost to the watchdog while still connected: take it back once and say so."""
+        self._control_lost = False
+        if self.session.request("control.take", actor="system").ok:
+            self.session.note("control re-taken (watchdog)", "system")
+            self._stream_all()
+
     # --- state --------------------------------------------------------------------------
     def state(self) -> dict:
         with self.lock:
@@ -99,7 +166,7 @@ class ConsoleApp:
             manifest = self.session.manifest
             rig = getattr(transport, "rig", None)
             return {
-                "version": __version__, "cursor": len(self.feed), "busy": self.busy,
+                "version": __version__, "cursor": len(self.feed), "busy": self.busy or self.agent_busy,
                 "session": {"id": self.session.id, "created_at": self.session.created_at,
                             "verdict": self.session.verdict, "events": len(self.session.events),
                             "wiring": {str(k): v for k, v in self.session.wiring.items()},
@@ -112,14 +179,14 @@ class ConsoleApp:
                 "behaviors": [b.describe() for b in rig.behaviors] if rig else [],
                 "replay": self.replay["id"] if self.replay else None,
                 "scenarios": list_scenarios(),
-                "llm": False,
+                "llm": bool(os.environ.get("OPENAI_API_KEY")),
             }
 
     # --- actions --------------------------------------------------------------------------
     def connect(self, data: dict) -> dict:
         kind = data.get("transport", "virtual")
         with self.lock:
-            if self._connected():
+            if self.session.transport is not None:  # a session holds one connection, even once closed
                 self._new_session()
             self.replay = None
             try:
@@ -194,8 +261,38 @@ class ConsoleApp:
         with self.lock:
             if self.replay:
                 raise ApiError(409, "exit replay before using the agent")
+            if self.agent_busy:
+                raise ApiError(409, "the agent is still working on the previous prompt")
             self.session.note(text.strip(), "tester")
-            from .intent import interpret
+            if not os.environ.get("OPENAI_API_KEY"):
+                return self._interpret(text)
+            session, tools, context = self.session, _LockedTools(self, self.tools), self._agent_context()
+            self.agent_busy = True
+        try:
+            outcome = run_agent(tools, text.strip(), context)
+        except Exception as exc:  # noqa: BLE001 - auth, network, SDK missing...: the offline path still works
+            log.warning("AI agent failed, using the offline interpreter: %r", exc)
+            return self._interpret(text, AI_FALLBACK.format(_short_reason(exc)))
+        finally:
+            self.agent_busy = False
+        with self.lock:
+            session.note(outcome["reply"], "agent")
+        return {"reply": outcome["reply"], "results": outcome["results"]}
+
+    def _agent_context(self) -> dict:
+        """What the model needs to know about the bench right now (called under the lock)."""
+        transport = self.session.transport
+        notes = [{"actor": e["actor"], "text": e["text"]} for e in self.session.events if e["kind"] == "note"]
+        return {"connected": self._connected(), "transport": transport.describe() if transport else None,
+                "wiring": {str(k): v for k, v in self.session.wiring.items()},
+                "pending_wiring": {str(k): v for k, v in self.session.pending_wiring.items()},
+                "uart_ports": sorted(getattr(self.tools, "_rx", {})),  # ports opened through the tools
+                "recent_notes": notes[-AGENT_HISTORY_NOTES - 1:-1]}  # the last note is this prompt
+
+    def _interpret(self, text: str, prefix: str = "") -> dict:
+        """The offline intent path; ``prefix`` tells the tester why the AI agent was not used."""
+        from .intent import interpret
+        with self.lock:
             action = interpret(text, self.state())
             if action["kind"] == "plan":
                 try:
@@ -203,8 +300,8 @@ class ConsoleApp:
                 except PlanError as exc:
                     raise ApiError(400, str(exc)) from None
                 self._notice("plan.compiled", plan=plan)
-                reply = action["reply"] + (f" Needs: {', '.join(plan['needs'])}." if plan.get("needs") else
-                                           f" {len(plan['steps'])} steps; press Run to execute.")
+                reply = prefix + action["reply"] + (f" Needs: {', '.join(plan['needs'])}." if plan.get("needs")
+                                                    else f" {len(plan['steps'])} steps; press Run to execute.")
                 self.session.note(reply, "agent")
                 return {"reply": reply, "plan": plan}
             if action["kind"] == "tools":
@@ -219,11 +316,12 @@ class ConsoleApp:
                         results.append({"tool": call["tool"], "ok": False,
                                         "error": {"code": exc.code, "msg": exc.msg, **exc.extra}})
                         break
-                reply = action["reply"](results) if callable(action["reply"]) else action["reply"]
+                reply = prefix + (action["reply"](results) if callable(action["reply"]) else action["reply"])
                 self.session.note(reply, "agent")
                 return {"reply": reply, "results": results}
-            self.session.note(action["reply"], "agent")
-            return {"reply": action["reply"]}
+            reply = prefix + action["reply"]
+            self.session.note(reply, "agent")
+            return {"reply": reply}
 
     def run_plan(self, slug: str, data: dict | None = None) -> dict:
         with self.lock:
@@ -270,9 +368,44 @@ class ConsoleApp:
         return self.state()
 
     def close(self) -> None:
+        self._closing.set()
+        self._keepalive.join(KEEPALIVE_JOIN_S)
         with self.lock:
             if self.session:
                 self.session.close()
+
+
+class _LockedTools:
+    """The agent's handle on the tools: the console lock is held for one tool call at a time and
+    never while the model is thinking, so /api/state and /api/events stay live during a prompt."""
+
+    def __init__(self, app: ConsoleApp, tools: Tools):
+        self._app, self._tools = app, tools
+
+    def call(self, tool: str, /, **args) -> dict:
+        with self._app.lock:
+            if self._app.replay:
+                raise ToolError("replay", "exit replay before driving the rig")
+            return self._tools.call(tool, **args)
+
+
+def _manual_clock(transport) -> bool:
+    """A Virtual Rig on a manual clock has no wall-clock watchdog (and tests step it deterministically)."""
+    rig = getattr(transport, "rig", None)
+    return rig is not None and not rig.clock.realtime
+
+
+def _watchdog_s(transport) -> float:
+    """The watchdog in force: TcpTransport remembers it, the Virtual Rig holds it, else the manifest."""
+    rig_controller = getattr(getattr(transport, "rig", None), "controller", None) or {}
+    limits = (transport.manifest or {}).get("limits") or {}
+    return float(getattr(transport, "watchdog_s", None) or rig_controller.get("watchdog_s")
+                 or limits.get("watchdog_s") or DEFAULT_LIMITS["watchdog_s"])
+
+
+def _short_reason(exc: Exception) -> str:
+    """A few words for the tester; the full error goes to the server log."""
+    return "openai package not installed" if isinstance(exc, ImportError) else type(exc).__name__
 
 
 def load_plan_inline(plan):

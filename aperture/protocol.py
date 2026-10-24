@@ -52,12 +52,15 @@ OPS: dict[str, dict[str, tuple]] = {
     "capture.start": {"pins": ("list[pin]", True), "rate_hz": ("uint", True), "duration_ms": ("uint", True)},
     "capture.cancel": {"capture_id": ("uint", True)},
     "stream.set": {"pins": ("list[pin]", True), "on": ("bool", True)},
+    "flash.begin": {},
+    "flash.write": {"offset": ("uint", True), "data": ("bytes", True)},
+    "flash.run": {"baud": ("uint", False), "manual_boot": ("bool", False)},
     "list_pins": {},
     "release_all": {},
 }
 DRIVING_OPS = frozenset({"pin.mode", "pin.write", "pin.pulse", "pin.pwm", "uart.open", "uart.close",
                          "uart.write", "spi.xfer", "i2c.write", "capture.start", "capture.cancel",
-                         "release_all"})
+                         "release_all", "flash.begin", "flash.write", "flash.run"})
 EVENTS = ("pin.change", "uart.rx", "capture.done", "control.changed", "control.lost", "stream.overflow",
           "rig.warning")
 

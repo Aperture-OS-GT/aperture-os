@@ -1,9 +1,11 @@
 """UART, SPI and I2C ops for the hardware executor, and which buses a bridge owns.
 
 A bus that is enabled here owns its header pins (they are reserved for it); a bus that is
-not enabled answers ``err:unsupported`` and its pins stay ordinary GPIOs. Error codes and
-payloads follow the Virtual Rig: an unopened port is ``bad_request``, a missing I2C device
-is ``io`` "no device acknowledged at 0x..".
+not enabled answers ``err:unsupported`` and its pins stay ordinary GPIOs. The DUT's EN and
+BOOT wires (``flash``) are reserved too whenever flashing is possible (a UART is enabled),
+so a GPIO op can never hold the DUT in reset. Error codes and payloads follow the Virtual
+Rig: an unopened port is ``bad_request``, a missing I2C device is ``io`` "no device
+acknowledged at 0x..".
 """
 from __future__ import annotations
 
@@ -31,8 +33,28 @@ class BusConfig:
     uart: str | None = None  # serial device on GPIO14/15, e.g. /dev/serial0
     i2c: bool = False        # I2C1 on GPIO2/3
     spi: bool = False        # SPI0 on GPIO7-11
+    flash: tuple[int, int] | None = None  # (BOOT, EN) GPIOs wired to the ESP32, e.g. (24, 25)
+
+    def __post_init__(self) -> None:
+        if self.flash is None:
+            return
+        taken = self._bus_pins()
+        if len(set(self.flash)) != 2 or any(p not in P.GPIO_PINS or p in taken for p in self.flash):
+            raise ValueError(f"flash pins {self.flash} must be two different GPIOs (BOOT, EN) "
+                             "not used by an enabled bus")
+
+    @property
+    def flashing(self) -> bool:
+        """The DUT can be programmed: esptool on the UART, EN and BOOT driven from GPIO."""
+        return bool(self.uart and self.flash)
 
     def reserved_pins(self) -> dict[int, str]:
+        reserved = self._bus_pins()
+        if self.flashing:
+            reserved.update({pin: "flash" for pin in self.flash})
+        return reserved
+
+    def _bus_pins(self) -> dict[int, str]:
         reserved: dict[int, str] = {}
         if self.uart:
             for port in P.UART_PORTS:

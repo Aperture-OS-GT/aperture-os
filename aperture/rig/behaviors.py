@@ -6,7 +6,11 @@ UART traffic and bus transactions. Scenario JSON files instantiate behaviors by
 """
 from __future__ import annotations
 
+import re
+
 from .. import pins as P
+
+BOOT_DELAY_US = 300_000  # reset released -> the firmware prints its banner
 
 
 class Behavior:
@@ -31,6 +35,9 @@ class Behavior:
 
     def on_uart(self, pin: int, data: bytes, t_us: int) -> None:
         pass
+
+    def on_flash(self) -> None:
+        """The bridge just (re)programmed the DUT's flash; its UART ports are already closed."""
 
     def describe(self) -> dict:
         return {"type": type(self).__name__, "name": self.name}
@@ -233,6 +240,8 @@ class ScriptedDut(Behavior):
     trigger is high or PWM duty > 80 %, so the relay stays engaged - the planted bug plans must catch.
     """
 
+    banner = b"BOOT OK\n"
+
     def __init__(self, demo_bug: bool = True, trigger: int = 17, pwm: int = 18, fault: int = 27,
                  actuator: int = 22, safety: int = 23, uart_tx: int = 15, uart_rx: int = 14,
                  baud: int = 115200, name: str = ""):
@@ -250,13 +259,16 @@ class ScriptedDut(Behavior):
         self.state = "IDLE"
         self.rig.drive_external(self.actuator, 0)
         self.rig.drive_external(self.safety, 1)
-        if self.rig.uart_open_for(self.uart_tx):
-            self.rig.after(300_000, lambda: self.rig.uart_deliver(self.uart_tx, b"BOOT OK\n"))
+        self._schedule_banner()
         self._update()
 
     def on_uart_open(self, tx: int, rx: int, baud: int) -> None:
         if rx == self.uart_tx:
-            self.rig.after(300_000, lambda: self.rig.uart_deliver(self.uart_tx, b"BOOT OK\n"))
+            self._schedule_banner()
+
+    def _schedule_banner(self) -> None:
+        if self.rig.uart_open_for(self.uart_tx):
+            self.rig.after(BOOT_DELAY_US, lambda: self.rig.uart_deliver(self.uart_tx, self.banner))
 
     def duty(self) -> float:
         pin = self.rig.pins[self.pwm]
@@ -290,8 +302,119 @@ class ScriptedDut(Behavior):
         return {**super().describe(), "demo_bug": self.demo_bug, "state": self.state}
 
 
+# firmware/esp32_dut/esp32_dut.ino constants
+LCD_COLS = 16
+COMMAND_MAX = 64            # line buffer: characters past this are dropped
+LED_HZ_MAX = 50.0
+BOOT_LCD = ("Aperture OS", "rig-01 online")
+BOOT_LED = ("blink", 2.0)
+EOL = b"\r\n"               # Serial.println
+ARDUINO_SPACE = " \t\n\v\f\r"  # what String::trim() strips
+_LEADING_FLOAT = re.compile(r"[ \t\n\v\f\r]*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)")
+
+
+def _atof(text: str) -> float:
+    """String::toFloat (C atof): the leading decimal number, 0.0 when there is none."""
+    match = _LEADING_FLOAT.match(text)
+    return float(match.group(1)) if match else 0.0
+
+
+class Esp32Dut(ScriptedDut):
+    """rig-01's ESP32 DevKit V1 running firmware/esp32_dut/esp32_dut.ino.
+
+    The ScriptedDut safety controller plus the 16x2 LCD, the status LED on ESP32 GPIO13 (not wired
+    to the Pi) and the line-based UART0 commands with the firmware's replies. ``en`` is the Pi pin on
+    ESP32 EN: driven low it holds the chip in reset (outputs high-Z); released or driven high the
+    DevKit pull-up boots it again. Every boot (power-on, EN release, after a flash) restores the
+    LCD/LED defaults and prints the banner if a UART is open. GPIO24 -> BOOT is not modelled.
+    """
+
+    banner = b"BOOT OK" + EOL
+
+    def __init__(self, en: int = 25, **kwargs):
+        super().__init__(**kwargs)
+        self.en = _gpio(en)
+        self.lcd, (self.led_mode, self.led_hz) = BOOT_LCD, BOOT_LED
+        self.running, self._boot, self._line = False, 0, b""
+
+    def _en_level(self) -> int:
+        pin = self.rig.pins[self.en]
+        return pin.drive if pin.mode in ("output", "pwm") and pin.drive is not None else 1
+
+    def reset(self) -> None:
+        if self._en_level() == 0:
+            self._hold_in_reset()
+            return
+        self.running, self._boot, self._line = True, self._boot + 1, b""
+        self.lcd, (self.led_mode, self.led_hz) = BOOT_LCD, BOOT_LED
+        super().reset()
+
+    def _hold_in_reset(self) -> None:
+        self.running, self._boot, self.state = False, self._boot + 1, "RESET"
+        self.rig.drive_external(self.actuator, None)
+        self.rig.drive_external(self.safety, None)
+
+    def on_flash(self) -> None:
+        self.reset()  # the new image boots; its banner follows the next uart.open
+
+    def on_pin(self, pin: int, level: int, t_us: int) -> None:
+        if pin != self.en:
+            if self.running:
+                super().on_pin(pin, level, t_us)
+        elif self.running and self._en_level() == 0:
+            self._hold_in_reset()
+        elif not self.running and self._en_level() == 1:
+            self.reset()
+
+    def _schedule_banner(self) -> None:
+        if self.running and self.rig.uart_open_for(self.uart_tx):
+            boot = self._boot
+            self.rig.after(BOOT_DELAY_US, lambda: self._print_banner(boot))
+
+    def _print_banner(self, boot: int) -> None:
+        if boot == self._boot:  # not reset again before setup() got there
+            self.rig.uart_deliver(self.uart_tx, self.banner)
+
+    def on_uart(self, pin: int, data: bytes, t_us: int) -> None:
+        if pin != self.uart_rx or not self.running:
+            return
+        for byte in data:
+            if byte in b"\r\n":
+                line, self._line = self._line, b""
+                self._command(line.decode("latin-1").strip(ARDUINO_SPACE))
+            elif len(self._line) < COMMAND_MAX:
+                self._line += bytes([byte])
+
+    def _command(self, cmd: str) -> None:
+        if cmd.startswith("LCD "):
+            top, _, bottom = cmd[4:].partition("|")
+            self.lcd = (top[:LCD_COLS], bottom[:LCD_COLS])
+            self._println("OK LCD")
+        elif cmd in ("LED ON", "LED OFF"):
+            self.led_mode = cmd[4:].lower()
+            self._println(f"OK {cmd}")
+        elif cmd.startswith("LED BLINK "):
+            self._blink(cmd[len("LED BLINK "):])
+        elif cmd:
+            self._println("ERR unknown command")
+
+    def _blink(self, text: str) -> None:
+        hz = _atof(text)
+        if not 0 < hz <= LED_HZ_MAX:
+            self._println("ERR LED hz must be 0..50")
+            return
+        self.led_mode, self.led_hz = "blink", hz
+        self._println(f"OK LED {text}")
+
+    def _println(self, text: str) -> None:
+        self.rig.uart_deliver(self.uart_tx, text.encode("latin-1") + EOL)
+
+    def describe(self) -> dict:
+        return {**super().describe(), "lcd": list(self.lcd), "led": {"mode": self.led_mode, "hz": self.led_hz}}
+
+
 BEHAVIORS = {cls.__name__: cls for cls in (Loopback, Button, Blinker, UartEcho, I2cRegisterDevice,
-                                            SpiLoopback, ScriptedDut)}
+                                            SpiLoopback, ScriptedDut, Esp32Dut)}
 
 
 def make_behavior(spec: dict) -> Behavior:

@@ -3,11 +3,13 @@
 The executor (``VirtualRig`` in sim mode, the hardware executor on a Pi) owns op
 semantics, the take-control handshake and the watchdog. This layer adds what only a
 multi-client daemon knows: which connection sent a request, whether that connection
-holds control, and whose outputs to release when a link drops.
+holds control, and whose outputs to release when a link drops. A bug in one op is logged
+and answered with ``err:io``; it never takes the connection down.
 """
 from __future__ import annotations
 
 import itertools
+import logging
 import threading
 from collections import deque
 from collections.abc import Callable
@@ -28,6 +30,7 @@ from aperture.protocol import (
 CONTROLLER_ONLY_READS = frozenset({"uart.read", "i2c.read", "i2c.scan"})
 OUTBOX_LIMIT = 1000
 PUMP_INTERVAL_S = 0.001
+log = logging.getLogger(__name__)
 
 
 class Executor(Protocol):
@@ -168,6 +171,9 @@ class BridgeServer:
             reply = self._dispatch(conn, validate_request(message), message)
         except ProtocolError as exc:
             reply = error(request_id, now(), exc.code, exc.msg, **exc.extra)
+        except Exception as exc:  # a bridge bug: answer the request and keep the link
+            log.exception("%s from %s failed unexpectedly", message.get("op"), conn.name)
+            reply = error(request_id, now(), "io", f"internal bridge error: {type(exc).__name__}")
         conn.send(reply)
 
     def _dispatch(self, conn: Connection, request: dict, message: dict) -> dict:

@@ -1,0 +1,4 @@
+{"name": "rig01", "title": "rig-01: ESP32 DevKit V1 + 16x2 LCD + status LED",
+ "description": "The bench rig. Pi GPIO17 -> D4 trigger, GPIO18 -> D5 PWM (100 Hz), GPIO27 -> D18 fault; D19 -> GPIO22 actuator, D21 -> GPIO23 safety relay (DEMO_BUG planted). UART0 115200 8N1: GPIO14 TXD -> RX0, TX0 -> GPIO15 RXD, for flashing and for the commands LCD <line1>|<line2>, LED BLINK <hz>, LED ON, LED OFF. GPIO25 -> EN (reset); GPIO24 -> BOOT is not wired (manual boot). The 16x2 LCD and the status LED (D13) are on the ESP32; BOOT OK prints on every boot.",
+ "behaviors": [{"type": "Esp32Dut", "name": "dut", "demo_bug": true}],
+ "wiring_policy": "off"}
