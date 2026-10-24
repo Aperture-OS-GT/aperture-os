@@ -24,8 +24,10 @@ class Harness:
                     result = {"pong": True}
                 else:
                     if cmd == "set_pin":
-                        self.backend.apply(**{ "trig" if command["pin"] == 17 else "fault":
-                                              command["val"]})
+                        pins = {17: "trig", 27: "fault"}
+                        if type(command["pin"]) is not int or command["pin"] not in pins:
+                            raise ValueError("digital output pin must be 17 or 27")
+                        self.backend.apply(**{pins[command["pin"]]: command["val"]})
                     elif cmd == "set_pwm":
                         self.backend.apply(pwm=command["duty"])
                     elif cmd == "inject_fault":

@@ -35,6 +35,39 @@ The agent exits **1** for detected safety violations; the demo exits **0** only 
 the expected bug was caught. `aperture-daemon --fixed` simulates a repaired build;
 the offline agent then passes and exits 0. No API key, Bluetooth or hardware required.
 
+## Aperture OS Console
+
+```sh
+pip install -e '.[dev]'  # refresh console entry points after updating
+aperture-ui --port 8080
+```
+
+Open **http://localhost:8080**. The offline, dark-themed console starts its own
+simulated TCP harness: no separate daemon, CDN, API key or frontend build needed.
+Click **Full safety plan** to see the red **FIRMWARE LIED** alert. The pin board
+then retains the first failed observation as labeled evidence; the rig itself
+finishes at idle. Switch DEMO_BUG off and click Connect to start a fixed simulated
+rig, then repeat the plan to see it pass. Connect applies transport and build edits.
+
+The copilot accepts full plans, trigger high/low, PWM N%, inject/clear fault,
+read state and reset to idle. If `OPENAI_API_KEY` is set, prompts go to the existing
+LLM tool loop (`pip install -e '.[llm]'`); `OPENAI_MODEL` optionally selects a model.
+Tool observations, reasoning, raw TX/RX JSON, UTC timestamps and measured round-trip
+latency stream over SSE. Filter, pause or clear the wire log; export the latest
+JSON report. Logs retain the most recent 1,000 events in memory, not on disk.
+
+For an existing harness: `aperture-ui --backend-mode tcp --host <Pi-IP>
+--daemon-port 8765`; for RFCOMM use `--backend-mode rfcomm --host <Pi-MAC>
+--daemon-port 1`. The HTTP server binds to loopback only. This is a single-operator
+local console, not an authenticated multiuser control plane; concurrent writes
+return 409. Use it only with trusted local users and a safe bench load.
+
+HTTP API: `GET /api/state`, `/api/report`, `/api/events` (SSE);
+`POST /api/prompt` with `{"prompt":"Run full safety plan"}`;
+`POST /api/connect` with `{"mode":"sim","host":"127.0.0.1","port":8765,
+"demo_bug":true}`. API failures use JSON `error` and HTTP 400/409/502; a completed
+test with a detected firmware fault returns HTTP 200 and `report.pass:false`.
+
 ## Wiring (Pi numbering is BCM)
 
 | Signal | Raspberry Pi | ESP32 | Direction / purpose |

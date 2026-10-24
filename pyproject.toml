@@ -18,9 +18,13 @@ dev = ["pytest>=8", "ruff>=0.9"]
 [project.scripts]
 aperture-daemon = "pi.daemon:main"
 aperture-agent = "agent.main:main"
+aperture-ui = "ui.server:main"
 
 [tool.setuptools.packages.find]
-include = ["pi*", "agent*"]
+include = ["pi*", "agent*", "ui*"]
+
+[tool.setuptools.package-data]
+ui = ["static/*"]
 
 [tool.ruff]
 line-length = 100

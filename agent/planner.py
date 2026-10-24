@@ -104,13 +104,13 @@ TOOL_SCHEMAS = [
 ]
 
 
-def run_llm(client, model, display=None, max_turns=30):
+def run_llm(client, model, display=None, max_turns=30, prompt="Execute the safety test plan now."):
     from openai import OpenAI
 
     llm = OpenAI()
     tools = Tools(client)
     messages = [{"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": "Execute the safety test plan now."}]
+                {"role": "user", "content": prompt}]
     summary = "Turn limit reached; plan incomplete"
     complete = False
     try:
